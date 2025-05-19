@@ -13,12 +13,15 @@ jobs:
       - name: Install ipsw tool
         run: brew install blacktop/tap/ipsw
 
-      - name: Download firmware
+      - name: Download firmware 22F76 only
         run: |
           mkdir -p firmware
           cd firmware
-          # specify the 'ipsw' subcommand and auto-confirm
-          ipsw download ipsw --device iPhone17,2 --confirm
+          # download only build 22F76 for iPhone17,2
+          ipsw download ipsw \
+            --device iPhone17,2 \
+            --build 22F76 \
+            --confirm
           echo "FIRMWARE_PATH=$(ls *.ipsw)" >> $GITHUB_ENV
 
       - name: Extract firmware
@@ -41,7 +44,6 @@ jobs:
 
       - name: Commit the extracted files
         run: |
-          # bring everything back into the repo root
           rsync -a firmware/extracted/ ./
           git add .
           git commit -m "Add extracted firmware files" || echo "Nothing to commit"
