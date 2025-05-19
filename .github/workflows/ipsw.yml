@@ -1,4 +1,4 @@
-name: Firmware Extract and commit
+name: Firmware Extract and Commit
 
 on:
   workflow_dispatch:
@@ -11,8 +11,7 @@ jobs:
         uses: actions/checkout@v3
 
       - name: Install ipsw tool
-        run: |
-          brew install blacktop/tap/ipsw
+        run: brew install blacktop/tap/ipsw
 
       - name: Download firmware
         run: |
@@ -25,9 +24,7 @@ jobs:
         run: |
           cd firmware
           mkdir -p extracted
-          ipsw extract $FIRMWARE_PATH -d extracted
-          find extracted -type f | wc -l
-          find extracted -type d | wc -l
+          ipsw extract "$FIRMWARE_PATH" -d extracted
 
       - name: Upload firmware as an artifact
         uses: actions/upload-artifact@v4
@@ -38,50 +35,16 @@ jobs:
 
       - name: Configure Git
         run: |
-          git config --global user.name "GitHub Action"
-          git config --global user.email "action@github.com"
+          git config user.name "GitHub Action"
+          git config user.email "action@github.com"
 
       - name: Commit the extracted files
         run: |
-          cd firmware/extracted
-          
-          commit_path() {
-            local path=$1
-            local rel_path=$(realpath --relative-to=. "$path")
-            
-            if [ -d "$path" ]; then
-              mkdir -p "../../../$rel_path"
-            fi
-            
-            if [ -f "$path" ]; then
-              cp "$path" "../../../$rel_path"
-              cd ../../..
-              git add "$rel_path"
-              git commit -m "Add firmware file: $rel_path" || true
-              cd - > /dev/null
-            elif [ -d "$path" ]; then
-              find "$path" -type f -maxdepth 1 | while read file; do
-                file_rel_path=$(realpath --relative-to=. "$file")
-                cp "$file" "../../../$file_rel_path"
-                cd ../../..
-                git add "$file_rel_path"
-                git commit -m "Add firmware file: $file_rel_path" || true
-                cd - > /dev/null
-              done
-            fi
-          }
-          
-          find . -maxdepth 1 -type d | while read dir; do
-            if [ "$dir" != "." ]; then
-              commit_path "$dir"
-            fi
-          done
-          
-          find . -maxdepth 1 -type f | while read file; do
-            commit_path "$file"
-          done
-          
-          cd ../../
-          
+          rsync -a firmware/extracted/ ./
+          git add .
+          git commit -m "Add extracted firmware files" || echo "Nothing to commit"
+
       - name: Push changes
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: git push
