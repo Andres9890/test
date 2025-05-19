@@ -17,7 +17,8 @@ jobs:
         run: |
           mkdir -p firmware
           cd firmware
-          ipsw download --device iPhone17,2
+          # specify the 'ipsw' subcommand and auto-confirm
+          ipsw download ipsw --device iPhone17,2 --confirm
           echo "FIRMWARE_PATH=$(ls *.ipsw)" >> $GITHUB_ENV
 
       - name: Extract firmware
@@ -40,6 +41,7 @@ jobs:
 
       - name: Commit the extracted files
         run: |
+          # bring everything back into the repo root
           rsync -a firmware/extracted/ ./
           git add .
           git commit -m "Add extracted firmware files" || echo "Nothing to commit"
