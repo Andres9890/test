@@ -13,7 +13,6 @@ jobs:
       - name: Install ipsw tool
         run: |
           brew install blacktop/tap/ipsw
-          ipsw --version
 
       - name: Download firmware
         run: |
