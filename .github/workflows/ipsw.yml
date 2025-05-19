@@ -18,7 +18,7 @@ jobs:
         run: |
           mkdir -p firmware
           cd firmware
-          ipsw download --device iPhone17,2 --output-dir .
+          ipsw download --device iPhone17,2
           echo "FIRMWARE_PATH=$(ls *.ipsw)" >> $GITHUB_ENV
 
       - name: Extract firmware
