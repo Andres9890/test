@@ -31,11 +31,11 @@ jobs:
           find extracted -type d | wc -l
 
       - name: Upload firmware as an artifact
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: ios-firmware-extracted
           path: firmware/extracted
-          retention-days: 5
+          retention-days: 90
 
       - name: Configure Git
         run: |
