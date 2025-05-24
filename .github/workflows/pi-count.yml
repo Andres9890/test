@@ -1,0 +1,207 @@
+name: Calculate Pi Digits
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+    paths: [ '.github/workflows/pi-count.yml' ]
+
+jobs:
+  calculate-pi:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+        
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install mpmath
+        
+    - name: Create pi calculation script
+      run: |
+        cat > calculate_pi.py << 'EOF'
+        import mpmath
+        import os
+        import sys
+        
+        def calculate_pi_digits(target_digits=100000, max_file_size_mb=100):
+            """
+            Calculate pi digits and write to files, creating new files when size limit is reached.
+            """
+            # Set precision high enough to calculate the required digits
+            mpmath.mp.dps = target_digits + 100  # Extra precision for safety
+            
+            print(f"Calculating {target_digits} digits of pi...")
+            print(f"Maximum file size: {max_file_size_mb}MB per file")
+            
+            # Calculate pi to the required precision
+            pi_str = str(mpmath.pi)
+            
+            # Remove the decimal point and take only the digits we need
+            if '.' in pi_str:
+                pi_digits = pi_str.replace('.', '')
+            else:
+                pi_digits = pi_str
+                
+            # Ensure we have enough digits
+            if len(pi_digits) < target_digits:
+                print(f"Warning: Only calculated {len(pi_digits)} digits, expected {target_digits}")
+                target_digits = len(pi_digits)
+            else:
+                pi_digits = pi_digits[:target_digits]
+            
+            print(f"Successfully calculated {len(pi_digits)} digits of pi")
+            
+            # Write digits to files with size limit
+            max_file_size_bytes = max_file_size_mb * 1024 * 1024
+            file_number = 1
+            digits_written = 0
+            current_file_size = 0
+            
+            # Create output directory
+            os.makedirs('pi_digits', exist_ok=True)
+            
+            current_file = None
+            
+            try:
+                while digits_written < len(pi_digits):
+                    # Open new file if needed
+                    if current_file is None:
+                        filename = f'pi_digits/pi_digits_{file_number:03d}.txt'
+                        current_file = open(filename, 'w')
+                        current_file_size = 0
+                        print(f"Creating file: {filename}")
+                        
+                        # Write header for each file
+                        header = f"Pi digits (file {file_number}) - Digits {digits_written + 1} to "
+                        current_file.write(header)
+                        current_file_size += len(header.encode('utf-8'))
+                    
+                    # Calculate how many digits we can write
+                    remaining_digits = len(pi_digits) - digits_written
+                    remaining_file_space = max_file_size_bytes - current_file_size
+                    
+                    # Estimate bytes per digit (roughly 1 byte per digit + newlines)
+                    # We'll be conservative and check size frequently
+                    chunk_size = min(remaining_digits, 10000)  # Process in chunks
+                    
+                    if chunk_size <= 0:
+                        break
+                        
+                    # Get the chunk of digits
+                    chunk = pi_digits[digits_written:digits_written + chunk_size]
+                    
+                    # Add newlines every 80 characters for readability
+                    formatted_chunk = ""
+                    for i in range(0, len(chunk), 80):
+                        formatted_chunk += chunk[i:i+80] + "\n"
+                    
+                    # Check if this chunk would exceed file size limit
+                    chunk_bytes = len(formatted_chunk.encode('utf-8'))
+                    
+                    if current_file_size + chunk_bytes > max_file_size_bytes and current_file_size > 0:
+                        # Close current file and start new one
+                        end_info = f"\nEnd of file {file_number} - Total digits in file: {digits_written - file_start_digit}\n"
+                        current_file.write(end_info)
+                        current_file.close()
+                        current_file = None
+                        file_number += 1
+                        file_start_digit = digits_written
+                        continue
+                    
+                    # Write the chunk
+                    if current_file_size == len(f"Pi digits (file {file_number}) - Digits {digits_written + 1} to ".encode('utf-8')):
+                        # Complete the header
+                        end_digit = min(digits_written + chunk_size, len(pi_digits))
+                        header_end = f"{end_digit}\n" + "="*80 + "\n"
+                        current_file.write(header_end)
+                        current_file_size += len(header_end.encode('utf-8'))
+                        file_start_digit = digits_written
+                    
+                    current_file.write(formatted_chunk)
+                    current_file_size += chunk_bytes
+                    digits_written += chunk_size
+                    
+                    # Progress update
+                    if digits_written % 10000 == 0:
+                        progress = (digits_written / len(pi_digits)) * 100
+                        print(f"Progress: {digits_written}/{len(pi_digits)} digits ({progress:.1f}%) - File size: {current_file_size/1024/1024:.2f}MB")
+                
+                # Close final file
+                if current_file:
+                    end_info = f"\nEnd of file {file_number} - Total digits in file: {digits_written - file_start_digit}\n"
+                    current_file.write(end_info)
+                    current_file.close()
+                
+                print(f"\nCompleted! Written {digits_written} digits across {file_number} files")
+                
+                # Create summary file
+                with open('pi_digits/summary.txt', 'w') as summary:
+                    summary.write(f"Pi Digit Calculation Summary\n")
+                    summary.write(f"="*40 + "\n")
+                    summary.write(f"Total digits calculated: {digits_written}\n")
+                    summary.write(f"Number of files created: {file_number}\n")
+                    summary.write(f"Maximum file size: {max_file_size_mb}MB\n")
+                    summary.write(f"Target digits: {target_digits}\n")
+                    summary.write(f"\nFirst 100 digits of pi:\n")
+                    summary.write(f"3.{pi_digits[1:101]}\n")
+                    
+                    summary.write(f"\nFile list:\n")
+                    for i in range(1, file_number + 1):
+                        filename = f'pi_digits_{i:03d}.txt'
+                        filepath = f'pi_digits/{filename}'
+                        if os.path.exists(filepath):
+                            size_mb = os.path.getsize(filepath) / 1024 / 1024
+                            summary.write(f"  {filename}: {size_mb:.2f}MB\n")
+                
+            except Exception as e:
+                if current_file:
+                    current_file.close()
+                print(f"Error: {e}")
+                sys.exit(1)
+        
+        if __name__ == "__main__":
+            calculate_pi_digits()
+        EOF
+        
+    - name: Run pi calculation
+      run: python calculate_pi.py
+      
+    - name: Display results summary
+      run: |
+        echo "=== Pi Calculation Results ==="
+        if [ -f "pi_digits/summary.txt" ]; then
+          cat pi_digits/summary.txt
+        fi
+        
+        echo -e "\n=== Files Created ==="
+        ls -lh pi_digits/
+        
+        echo -e "\n=== Total Size ==="
+        du -sh pi_digits/
+        
+    - name: Commit and push results
+      run: |
+        git config --local user.email "action@github.com"
+        git config --local user.name "GitHub Action"
+        git add pi_digits/
+        
+        if git diff --staged --quiet; then
+          echo "No changes to commit"
+        else
+          git commit -m "Add pi digits calculation results
+          
+          - Calculated 100,000 digits of pi
+          - Split into files with 100MB max size
+          - Generated $(ls pi_digits/pi_digits_*.txt | wc -l) data files
+          - Total size: $(du -sh pi_digits/ | cut -f1)"
+          
+          git push
+        fi
