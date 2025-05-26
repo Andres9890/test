@@ -30,7 +30,7 @@ jobs:
           python3 sherlock "${{ github.event.inputs.username }}" --print-found
 
       - name: Save & upload results
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: sherlock-results
           path: sherlock/results/*
