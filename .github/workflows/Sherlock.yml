@@ -13,15 +13,33 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Install pipx and Sherlock
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
+      - name: Cache pipx packages and virtualenvs
+        uses: actions/cache@v4.2.3
+        with:
+          path: |
+            ~/.cache/pip
+            ~/.local/pipx
+            ~/.local/bin
+          key: ${{ runner.os }}-pipx-${{ hashFiles('**/sherlock.yml') }}
+          restore-keys: |
+            ${{ runner.os }}-pipx-
+
+      - name: Install pipx and Sherlock (if not cached)
         run: |
           python3 -m pip install --user pipx
           python3 -m pipx ensurepath
-          pipx install sherlock-project
+          if ! command -v sherlock &> /dev/null; then
+            pipx install sherlock-project
+          fi
 
       - name: Run Sherlock
         run: |
-          mkdir results
+          mkdir -p results
           sherlock "${{ github.event.inputs.username }}" --print-found --output results/output.txt
 
       - name: Upload results
