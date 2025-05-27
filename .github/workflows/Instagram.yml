@@ -1,0 +1,53 @@
+name: Download Instagram Account
+
+on:
+  workflow_dispatch:
+    inputs:
+      instagram_username:
+        description: 'Instagram username to download from'
+        required: true
+      login_username:
+        description: 'Your Instagram username'
+        required: false
+      login_password:
+        description: 'Your Instagram password'
+        required: false
+
+jobs:
+  download-instagram:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout repo
+      uses: actions/checkout@v3
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.x'
+
+    - name: Install Instaloader
+      run: |
+        python -m pip install --upgrade pip
+        pip install instaloader
+
+    - name: Create download directory
+      run: mkdir download
+
+    - name: Download Instagram media
+      env:
+        IG_USERNAME: ${{ github.event.inputs.login_username }}
+        IG_PASSWORD: ${{ github.event.inputs.login_password }}
+      run: |
+        cd download
+        if [ -n "$IG_USERNAME" ] && [ -n "$IG_PASSWORD" ]; then
+          instaloader --login "$IG_USERNAME" --password "$IG_PASSWORD" --dirname-pattern="{target}" --fast-update "${{ github.event.inputs.instagram_username }}"
+        else
+          instaloader --dirname-pattern="{target}" --fast-update "${{ github.event.inputs.instagram_username }}"
+        fi
+
+    - name: Upload as artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: instagram-media
+        path: download/
