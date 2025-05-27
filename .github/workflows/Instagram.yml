@@ -6,12 +6,6 @@ on:
       instagram_username:
         description: 'Instagram username to download from'
         required: true
-      login_username:
-        description: 'Your Instagram username'
-        required: false
-      login_password:
-        description: 'Your Instagram password'
-        required: false
 
 jobs:
   download-instagram:
@@ -36,18 +30,19 @@ jobs:
 
     - name: Download Instagram media
       env:
-        IG_USERNAME: ${{ github.event.inputs.login_username }}
-        IG_PASSWORD: ${{ github.event.inputs.login_password }}
+        IG_USERNAME: ${{ secrets.IG_USERNAME }}
+        IG_PASSWORD: ${{ secrets.IG_PASSWORD }}
       run: |
         cd download
-        if [ -n "$IG_USERNAME" ] && [ -n "$IG_PASSWORD" ]; then
-          instaloader --login "$IG_USERNAME" --password "$IG_PASSWORD" --dirname-pattern="{target}" --fast-update "${{ github.event.inputs.instagram_username }}"
-        else
-          instaloader --dirname-pattern="{target}" --fast-update "${{ github.event.inputs.instagram_username }}"
-        fi
+        instaloader --login "$IG_USERNAME" --password "$IG_PASSWORD" --dirname-pattern="{target}" --fast-update "${{ github.event.inputs.instagram_username }}"
+
+    - name: Zip the downloaded media
+      run: |
+        cd download
+        zip -r ../instagram-media.zip .
 
     - name: Upload as artifact
       uses: actions/upload-artifact@v4
       with:
         name: instagram-media
-        path: download/
+        path: instagram-media.zip
