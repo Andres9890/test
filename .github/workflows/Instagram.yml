@@ -46,8 +46,13 @@ jobs:
           instaloader --dirname-pattern="{target}" --fast-update "${{ github.event.inputs.instagram_username }}"
         fi
 
+    - name: Zip the downloaded media
+      run: |
+        cd download
+        zip -r ../instagram-media.zip .
+
     - name: Upload as artifact
       uses: actions/upload-artifact@v4
       with:
         name: instagram-media
-        path: download/
+        path: instagram-media.zip
