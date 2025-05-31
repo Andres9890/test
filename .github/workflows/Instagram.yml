@@ -34,7 +34,11 @@ jobs:
         IG_PASSWORD: ${{ github.event.inputs.login_password }}
       run: |
         cd download
-        instaloader --login "$IG_USERNAME" --password "$IG_PASSWORD" --dirname-pattern="{target}" --fast-update "${{ github.event.inputs.instagram_username }}"
+        if [ -n "$IG_USERNAME" ] && [ -n "$IG_PASSWORD" ]; then
+          instaloader --login "$IG_USERNAME" --password "$IG_PASSWORD" --dirname-pattern="{target}" --fast-update "${{ github.event.inputs.instagram_username }}"Add commentMore actions
+        else
+          instaloader --dirname-pattern="{target}" --fast-update "${{ github.event.inputs.instagram_username }}"
+        fi
 
     - name: Zip the downloaded media
       run: |
