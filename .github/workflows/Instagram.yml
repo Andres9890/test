@@ -30,8 +30,8 @@ jobs:
 
     - name: Download Instagram media
       env:
-        IG_USERNAME: ${{ secrets.IG_USERNAME }}
-        IG_PASSWORD: ${{ secrets.IG_PASSWORD }}
+        IG_USERNAME: ${{ github.event.inputs.login_username }}
+        IG_PASSWORD: ${{ github.event.inputs.login_password }}
       run: |
         cd download
         instaloader --login "$IG_USERNAME" --password "$IG_PASSWORD" --dirname-pattern="{target}" --fast-update "${{ github.event.inputs.instagram_username }}"
