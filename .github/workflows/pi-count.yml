@@ -2,6 +2,11 @@ name: Calculate Pi Digits
 
 on:
   workflow_dispatch:
+    inputs:
+      digits:
+        description: 'Number of digits of Pi to calculate'
+        required: true
+        default: '1000000'
   push:
     branches: [ main ]
     paths: [ '.github/workflows/pi-count.yml' ]
@@ -169,11 +174,13 @@ jobs:
                 sys.exit(1)
         
         if __name__ == "__main__":
-            calculate_pi_digits()
+            import sys
+            digits = int(sys.argv[1]) if len(sys.argv) > 1 else 1000000
+            calculate_pi_digits(target_digits=digits)
         EOF
         
     - name: Run pi calculation
-      run: python calculate_pi.py
+      run: python calculate_pi.py ${{ inputs.digits }}
       
     - name: Display results summary
       run: |
@@ -199,7 +206,7 @@ jobs:
         else
           git commit -m "Add pi digits calculation results
           
-          - Calculated 100,000,000 digits of pi
+          - Calculated ${{ inputs.digits }} digits of pi
           - Split into files with 100MB max size
           - Generated $(ls pi_digits/pi_digits_*.txt | wc -l) data files
           - Total size: $(du -sh pi_digits/ | cut -f1)"
