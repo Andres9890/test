@@ -1,0 +1,53 @@
+name: Transcribe Media from Link
+
+on:
+  workflow_dispatch:
+    inputs:
+      url:
+        description: 'Video or audio URL to download'
+        required: true
+      model:
+        description: 'Whisper model to use (tiny, base, small, medium, large)'
+        required: false
+        default: 'base'
+
+jobs:
+  transcribe:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v3
+
+      - name: Set up Python 3.9
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+
+      - name: Install system deps & Whisper + yt-dlp
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg
+          pip install --upgrade pip
+          pip install git+https://github.com/openai/whisper.git yt-dlp
+
+      - name: Download media
+        run: |
+          mkdir -p media
+          yt-dlp -o media/download.%(ext)s "${{ github.event.inputs.url }}"
+
+      - name: Set model variable
+        id: set_model
+        run: |
+          echo "model=${{ github.event.inputs.model }}" >> $GITHUB_OUTPUT
+
+      - name: Transcribe audio
+        run: |
+          mkdir -p transcripts
+          file=$(ls media/download.*)
+          whisper "$file" --model ${{ steps.set_model.outputs.model }} --output_dir transcripts
+
+      - name: Upload transcripts
+        uses: actions/upload-artifact@v4
+        with:
+          name: whisper-transcripts
+          path: transcripts/
