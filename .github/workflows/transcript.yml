@@ -1,10 +1,10 @@
-name: Transcribe Media from Link
+name: Transcribe Media from Link (curl)
 
 on:
   workflow_dispatch:
     inputs:
       url:
-        description: 'Video or audio URL to download'
+        description: 'Direct video or audio URL to download (e.g. MP4, MP3 link)'
         required: true
       model:
         description: 'Whisper model to use (tiny, base, small, medium, large)'
@@ -23,28 +23,30 @@ jobs:
         with:
           python-version: '3.9'
 
-      - name: Install system deps & Whisper + yt-dlp
+      - name: Install system deps & Whisper
         run: |
           sudo apt-get update
           sudo apt-get install -y ffmpeg
           pip install --upgrade pip
-          pip install git+https://github.com/openai/whisper.git yt-dlp
+          pip install git+https://github.com/openai/whisper.git
 
-      - name: Download media
+      - name: Download media with curl
         run: |
           mkdir -p media
-          yt-dlp -o media/download.%(ext)s "${{ github.event.inputs.url }}"
+          url="${{ github.event.inputs.url }}"
+          ext="${url##*.}"
+          curl -L "$url" -o "media/download.${ext}"
 
       - name: Set model variable
         id: set_model
         run: |
           echo "model=${{ github.event.inputs.model }}" >> $GITHUB_OUTPUT
 
-      - name: Transcribe audio
+      - name: Transcribe audio/video
         run: |
           mkdir -p transcripts
           file=$(ls media/download.*)
-          whisper "$file" --model ${{ steps.set_model.outputs.model }} --output_dir transcripts
+          whisper "$file" --model "${{ steps.set_model.outputs.model }}" --output_dir transcripts
 
       - name: Upload transcripts
         uses: actions/upload-artifact@v4
