@@ -1,27 +1,29 @@
-name: Decode Base64 Image
+name: Decode Base64 Image from File
 
 on:
   workflow_dispatch:
     inputs:
-      base64_data:
-        description: 'Base64 image data (no prefix like data:image/png;base64,)'
+      base64_file:
+        description: 'Path to Base64 text file (relative to repo root)'
         required: true
+        default: 'base64.txt'
 
 jobs:
   python:
     name: Decode with Python
     runs-on: ubuntu-latest
     steps:
-      - name: Create image with Python
+      - uses: actions/checkout@v4
+
+      - name: Decode Base64 using Python
         run: |
           mkdir output_python
-          echo "${{ inputs.base64_data }}" > output_python/image.b64
           python3 -c "
           import base64
-          data = open('output_python/image.b64', 'r').read()
+          data = open('${{ inputs.base64_file }}', 'r').read().strip()
           with open('output_python/image.png', 'wb') as f:
-          f.write(base64.b64decode(data.strip()))"
-          
+          f.write(base64.b64decode(data))"
+
       - name: Upload Python Output
         uses: actions/upload-artifact@v4
         with:
@@ -29,14 +31,15 @@ jobs:
           path: output_python/
 
   bash:
-    name: Decode with Bash (Linux)
+    name: Decode with Bash
     runs-on: ubuntu-latest
     steps:
-      - name: Create image with Bash
+      - uses: actions/checkout@v4
+
+      - name: Decode Base64 using Bash
         run: |
           mkdir output_bash
-          echo "${{ inputs.base64_data }}" > output_bash/image.b64
-          base64 -d output_bash/image.b64 > output_bash/image.png
+          base64 -d "${{ inputs.base64_file }}" > output_bash/image.png
       - name: Upload Bash Output
         uses: actions/upload-artifact@v4
         with:
@@ -44,15 +47,17 @@ jobs:
           path: output_bash/
 
   powershell:
-    name: Decode with PowerShell (Windows)
+    name: Decode with PowerShell
     runs-on: windows-latest
     steps:
-      - name: Decode using PowerShell
+      - uses: actions/checkout@v4
+
+      - name: Decode Base64 using PowerShell
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Path output_pwsh | Out-Null
-          $data = "${{ inputs.base64_data }}"
-          [System.IO.File]::WriteAllBytes("output_pwsh/image.png", [System.Convert]::FromBase64String($data))
+          $data = Get-Content "${{ inputs.base64_file }}" -Raw
+          [System.IO.File]::WriteAllBytes("output_pwsh/image.png", [System.Convert]::FromBase64String($data.Trim()))
       - name: Upload PowerShell Output
         uses: actions/upload-artifact@v4
         with:
