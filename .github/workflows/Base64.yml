@@ -1,0 +1,60 @@
+name: Decode Base64 Image
+
+on:
+  workflow_dispatch:
+    inputs:
+      base64_data:
+        description: 'Base64 image data (no prefix like data:image/png;base64,)'
+        required: true
+
+jobs:
+  python:
+    name: Decode with Python
+    runs-on: ubuntu-latest
+    steps:
+      - name: Create image with Python
+        run: |
+          mkdir output_python
+          echo "${{ inputs.base64_data }}" > output_python/image.b64
+          python3 -c "
+          import base64
+          data = open('output_python/image.b64', 'r').read()
+          with open('output_python/image.png', 'wb') as f:
+          f.write(base64.b64decode(data.strip()))"
+          
+      - name: Upload Python Output
+        uses: actions/upload-artifact@v4
+        with:
+          name: decoded-image-python
+          path: output_python/
+
+  bash:
+    name: Decode with Bash (Linux)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Create image with Bash
+        run: |
+          mkdir output_bash
+          echo "${{ inputs.base64_data }}" > output_bash/image.b64
+          base64 -d output_bash/image.b64 > output_bash/image.png
+      - name: Upload Bash Output
+        uses: actions/upload-artifact@v4
+        with:
+          name: decoded-image-bash
+          path: output_bash/
+
+  powershell:
+    name: Decode with PowerShell (Windows)
+    runs-on: windows-latest
+    steps:
+      - name: Decode using PowerShell
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path output_pwsh | Out-Null
+          $data = "${{ inputs.base64_data }}"
+          [System.IO.File]::WriteAllBytes("output_pwsh/image.png", [System.Convert]::FromBase64String($data))
+      - name: Upload PowerShell Output
+        uses: actions/upload-artifact@v4
+        with:
+          name: decoded-image-powershell
+          path: output_pwsh/
