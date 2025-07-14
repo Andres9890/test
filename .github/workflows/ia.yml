@@ -3,11 +3,20 @@ name: Download & Upload to archive.org
 on:
   workflow_dispatch:
     inputs:
-      links:
-        description: >-
-          Space-separated list of URLs to download (e.g.
-          `https://…/file1.zip https://…/file2.jpg`)
+      # New inputs to drive the GitLab download
+      project:
+        description: 'GitLab project path (URL-encoded), e.g. dynamicdust1%2FCharlieTheSteak-Assets'
         required: true
+        default: 'dynamicdust1%2FCharlieTheSteak-Assets'
+      ref:
+        description: 'Branch or tag to download from'
+        required: true
+        default: 'main'
+      subfolder:
+        description: 'Sub-folder path to limit download (leave blank for entire repo)'
+        required: false
+        default: ''
+      # Existing archive.org inputs
       identifier:
         description: 'archive.org identifier for the item (e.g. my-cool-dump)'
         required: true
@@ -22,8 +31,13 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: actions/checkout@v4
-        uses: actions/checkout@v4
+      - name: Check out repo
+        uses: actions/checkout@v3
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y jq curl
 
       - name: Set up Python
         uses: actions/setup-python@v4
@@ -41,31 +55,50 @@ jobs:
             --access-key ${{ secrets.ARCHIVE_ACCESS_KEY }} \
             --secret-key ${{ secrets.ARCHIVE_SECRET_KEY }}
 
-      - name: Download files with curl
+      - name: Download GitLab project files
+        env:
+          GITLAB_TOKEN: ${{ secrets.GITLAB_TOKEN }}
+          PROJECT:      ${{ inputs.project }}
+          REF:          ${{ inputs.ref }}
+          SUBFOLDER:    ${{ inputs.subfolder }}
         run: |
+          API="https://gitlab.com/api/v4/projects/${PROJECT}"
           mkdir -p files
-          for url in ${{ inputs.links }}; do
-            fn=$(basename "$url")
-            echo "→ Downloading $url as files/$fn"
-            curl -L "$url" -o "files/$fn"
-          done
+
+          # 1) list every blob path (optionally under SUBFOLDER)
+          curl -sS --header "PRIVATE-TOKEN: $GITLAB_TOKEN" \
+               "${API}/repository/tree?ref=${REF}&recursive=true&per_page=100${SUBFOLDER:+&path=${SUBFOLDER}}" \
+            | jq -r '.[] | select(.type=="blob") | .path' \
+            > paths.txt
+
+          # 2) download each file’s raw content into files/
+          while IFS= read -r path; do
+            mkdir -p "files/$(dirname "$path")"
+            curl -sS --header "PRIVATE-TOKEN: $GITLAB_TOKEN" \
+                 "${API}/repository/files/$(printf '%s' "$path" | jq -sRr @uri)/raw?ref=${REF}" \
+              -o "files/$path"
+            echo "✔ files/$path"
+          done < paths.txt
 
       - name: Upload to archive.org
         env:
-          LINKS:     ${{ inputs.links }}
-          IDENT:     ${{ inputs.identifier }}
-          METADATA:  ${{ inputs.metadata }}
+          IDENT:    ${{ inputs.identifier }}
+          METADATA: ${{ inputs.metadata }}
         run: |
           python <<'EOF'
           import os, json
           from internetarchive import upload
 
-          links     = os.environ['LINKS'].split()
-          identifier= os.environ['IDENT']
-          metadata  = json.loads(os.environ['METADATA'])
+          # grab every downloaded file under `files/`
+          files = []
+          for root, _, fnames in os.walk('files'):
+              for f in fnames:
+                  files.append(os.path.join(root, f))
 
-          files = [os.path.join('files', os.path.basename(u)) for u in links]
-          print(f"Uploading {files} → {identifier} with metadata {metadata}")
-          response = upload(identifier, files, metadata)
-          print(response)
+          identifier = os.environ['IDENT']
+          metadata   = json.loads(os.environ['METADATA'])
+
+          print(f"Uploading {len(files)} files → {identifier}")
+          resp = upload(identifier, files, metadata)
+          print(resp)
           EOF
