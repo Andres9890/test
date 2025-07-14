@@ -1,0 +1,71 @@
+name: Download & Upload to archive.org
+
+on:
+  workflow_dispatch:
+    inputs:
+      links:
+        description: >-
+          Space-separated list of URLs to download (e.g.
+          `https://…/file1.zip https://…/file2.jpg`)
+        required: true
+      identifier:
+        description: 'archive.org identifier for the item (e.g. my-cool-dump)'
+        required: true
+      metadata:
+        description: >-
+          JSON string of additional metadata, e.g.
+          `{"title":"My Title","description":"…","collection":"opensource"}`
+        required: true
+
+jobs:
+  upload:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: actions/checkout@v4
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.x'
+
+      - name: Install internetarchive lib
+        run: |
+          python -m pip install --upgrade pip
+          pip install internetarchive
+
+      - name: Configure archive.org creds
+        run: |
+          ia configure \
+            --access-key ${{ secrets.ARCHIVE_ACCESS_KEY }} \
+            --secret-key ${{ secrets.ARCHIVE_SECRET_KEY }}
+
+      - name: Download files with curl
+        run: |
+          mkdir -p files
+          for url in ${{ inputs.links }}; do
+            fn=$(basename "$url")
+            echo "→ Downloading $url as files/$fn"
+            curl -L "$url" -o "files/$fn"
+          done
+
+      - name: Upload to archive.org
+        env:
+          LINKS:     ${{ inputs.links }}
+          IDENT:     ${{ inputs.identifier }}
+          METADATA:  ${{ inputs.metadata }}
+        run: |
+          python <<'EOF'
+          import os, json
+          from internetarchive import upload
+
+          links     = os.environ['LINKS'].split()
+          identifier= os.environ['IDENT']
+          metadata  = json.loads(os.environ['METADATA'])
+
+          files = [os.path.join('files', os.path.basename(u)) for u in links]
+          print(f"Uploading {files} → {identifier} with metadata {metadata}")
+          response = upload(identifier, files, metadata)
+          print(response)
+          EOF
