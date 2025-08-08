@@ -52,8 +52,8 @@ jobs:
 
     - name: Upload to Archive.org
       env:
-        IA_ACCESS_KEY_ID: ${{ secrets.IA_ACCESS_KEY_ID }}
-        IA_SECRET_ACCESS_KEY: ${{ secrets.IA_SECRET_ACCESS_KEY }}
+        ARCHIVE_ACCESS_KEY: ${{ secrets.ARCHIVE_ACCESS_KEY }}
+        ARCHIVE_SECRET_KEY: ${{ secrets.ARCHIVE_SECRET_KEY }}
       shell: bash
       run: |
         ia upload "${ITEM_ID}" "${WARC_FILE}" \
