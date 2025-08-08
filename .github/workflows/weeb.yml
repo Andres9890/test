@@ -27,11 +27,8 @@ jobs:
       shell: bash
       run: |
         URL="${{ github.event.inputs.url }}"
-        # extract the domain (e.g. example.com)
         DOMAIN="$(echo "${URL}" | awk -F[/:] '{print $4}')"
-        # timestamp in UTC
         TS="$(date -u +%Y%m%dT%H%M%SZ)"
-        # combine to form item identifier
         ID="${DOMAIN}_${TS}"
         echo "ITEM_ID=${ID}" >> $GITHUB_ENV
         echo "WARC_FILE=${ID}.warc.gz" >> $GITHUB_ENV
@@ -47,7 +44,7 @@ jobs:
           --no-parent \
           --warc-file="${ITEM_ID}" \
           --warc-cdx \
-          --warc-compression=gzip \
+          --warc-compression on \
           "${{ github.event.inputs.url }}"
 
     - name: Upload to Archive.org
