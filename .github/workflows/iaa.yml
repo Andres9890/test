@@ -1,4 +1,4 @@
-name: Upload repo to Internet Archive
+name: Upload repo to Internet Archive (10 options)
 
 on:
   workflow_dispatch:
@@ -19,11 +19,11 @@ on:
         required: false
         default: ""
       mediatype:
-        description: "Archive.org mediatype (e.g., data, software, texts, image, audio, movies)"
+        description: "Mediatype (e.g., data, software, texts, image, audio, movies)"
         required: false
         default: "data"
       collection:
-        description: "Collection to place item in (e.g., opensource)"
+        description: "Collection (e.g., opensource)"
         required: false
         default: "opensource"
       subject:
@@ -34,62 +34,10 @@ on:
         description: "Creator / author"
         required: false
         default: ""
-      language:
-        description: "Language (e.g., eng)"
-        required: false
-        default: ""
-      date:
-        description: "ISO date (YYYY-MM-DD)"
-        required: false
-        default: ""
-      year:
-        description: "Year (YYYY)"
-        required: false
-        default: ""
       licenseurl:
         description: "License URL"
         required: false
         default: ""
-      rights:
-        description: "Rights statement"
-        required: false
-        default: ""
-      publisher:
-        description: "Publisher"
-        required: false
-        default: ""
-      contributor:
-        description: "Contributor"
-        required: false
-        default: ""
-      coverage:
-        description: "Spatial/temporal coverage"
-        required: false
-        default: ""
-      scanner:
-        description: "Scanner / capture tool"
-        required: false
-        default: ""
-      credits:
-        description: "Credits / acknowledgments"
-        required: false
-        default: ""
-      external_identifier:
-        description: "External identifier (e.g., urn:github:owner/repo)"
-        required: false
-        default: ""
-      uploader:
-        description: "Uploader name/email"
-        required: false
-        default: ""
-      source:
-        description: "Source URL (e.g., original repo URL)"
-        required: false
-        default: ""
-      noindex:
-        description: "Set to 'true' to request noindex"
-        required: false
-        default: "false"
       metadata_json:
         description: "Extra metadata as JSON (merged into item-level metadata)"
         required: false
@@ -101,7 +49,6 @@ jobs:
     permissions:
       contents: read
     env:
-      # Map inputs to env for the Python step
       IN_REPO_URL: ${{ inputs.repo_url }}
       IN_IDENTIFIER: ${{ inputs.identifier }}
       IN_TITLE: ${{ inputs.title }}
@@ -110,29 +57,16 @@ jobs:
       IN_COLLECTION: ${{ inputs.collection }}
       IN_SUBJECT: ${{ inputs.subject }}
       IN_CREATOR: ${{ inputs.creator }}
-      IN_LANGUAGE: ${{ inputs.language }}
-      IN_DATE: ${{ inputs.date }}
-      IN_YEAR: ${{ inputs.year }}
       IN_LICENSEURL: ${{ inputs.licenseurl }}
-      IN_RIGHTS: ${{ inputs.rights }}
-      IN_PUBLISHER: ${{ inputs.publisher }}
-      IN_CONTRIBUTOR: ${{ inputs.contributor }}
-      IN_COVERAGE: ${{ inputs.coverage }}
-      IN_SCANNER: ${{ inputs.scanner }}
-      IN_CREDITS: ${{ inputs.credits }}
-      IN_EXTERNAL_ID: ${{ inputs.external_identifier }}
-      IN_UPLOADER: ${{ inputs.uploader }}
-      IN_SOURCE: ${{ inputs.source }}
-      IN_NOINDEX: ${{ inputs.noindex }}
       IN_METADATA_JSON: ${{ inputs.metadata_json }}
 
     steps:
-      - name: Install Python and IA tools
+      - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
-      - name: Install internetarchive (CLI + Python)
+      - name: Install internetarchive
         run: |
           python -m pip install --upgrade pip
           pip install --upgrade internetarchive
@@ -143,19 +77,14 @@ jobs:
           IA_EMAIL: ${{ secrets.IA_EMAIL }}
           IA_PASSWORD: ${{ secrets.IA_PASSWORD }}
         run: |
-          # Non-interactive ia configure: feed email + password via stdin
           printf "%s\n%s\n" "$IA_EMAIL" "$IA_PASSWORD" | ia configure
           ia whoami || true
-        # 'ia configure' prompts for email/password per official docs.
 
       - name: Clone target repository
         run: |
           git clone --depth=1 "$IN_REPO_URL" target_repo
 
       - name: Upload all files to Archive.org (Python)
-        env:
-          GITHUB_RUN_ID: ${{ github.run_id }}
-          GITHUB_RUN_NUMBER: ${{ github.run_number }}
         run: |
           python - <<'PY'
           import json, os, re, sys
@@ -168,16 +97,20 @@ jobs:
             s = re.sub(r'[^a-zA-Z0-9._-]+', '-', s.strip())
             return re.sub(r'-{2,}', '-', s).strip('-').lower()
 
-          repo_url = os.environ["IN_REPO_URL"]
+          repo_url = os.environ["IN_REPO_URL"].strip()
           ident = os.environ.get("IN_IDENTIFIER", "").strip()
-          parsed = urlparse(repo_url)
-          # Try to pull owner/repo from typical GitHub URL forms
+
+          # Derive owner/repo from GitHub-style URL for a nice default identifier
           owner = repo = None
-          if "github.com" in parsed.netloc and parsed.path:
-            parts = [p for p in parsed.path.split('/') if p]
-            if len(parts) >= 2:
-              owner, repo = parts[0], parts[1].removesuffix(".git")
-          # Auto-generate identifier if not provided
+          try:
+            parsed = urlparse(repo_url)
+            if "github.com" in parsed.netloc and parsed.path:
+              parts = [p for p in parsed.path.split('/') if p]
+              if len(parts) >= 2:
+                owner, repo = parts[0], parts[1].removesuffix(".git")
+          except Exception:
+            pass
+
           if not ident:
             ts = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
             if owner and repo:
@@ -185,7 +118,7 @@ jobs:
             else:
               ident = f"github-snapshot-{ts}"
 
-          # Build metadata from inputs
+          # Build metadata (core + extras)
           md = {}
           def put(k, v):
             v = v.strip()
@@ -196,32 +129,15 @@ jobs:
           put("description", os.environ.get("IN_DESCRIPTION",""))
           put("mediatype", os.environ.get("IN_MEDIATYPE",""))
           put("collection", os.environ.get("IN_COLLECTION",""))
-          # subjects as a list
           subj = os.environ.get("IN_SUBJECT","").strip()
           if subj:
             md["subject"] = [s.strip() for s in subj.split(",") if s.strip()]
           put("creator", os.environ.get("IN_CREATOR",""))
-          put("language", os.environ.get("IN_LANGUAGE",""))
-          put("date", os.environ.get("IN_DATE",""))
-          put("year", os.environ.get("IN_YEAR",""))
           put("licenseurl", os.environ.get("IN_LICENSEURL",""))
-          put("rights", os.environ.get("IN_RIGHTS",""))
-          put("publisher", os.environ.get("IN_PUBLISHER",""))
-          put("contributor", os.environ.get("IN_CONTRIBUTOR",""))
-          put("coverage", os.environ.get("IN_COVERAGE",""))
-          put("scanner", os.environ.get("IN_SCANNER",""))
-          put("credits", os.environ.get("IN_CREDITS",""))
-          put("external-identifier", os.environ.get("IN_EXTERNAL_ID",""))
-          put("uploader", os.environ.get("IN_UPLOADER",""))
-          # helpful defaults
-          if repo_url and not os.environ.get("IN_SOURCE","").strip():
-            md["source"] = repo_url
-          else:
-            put("source", os.environ.get("IN_SOURCE",""))
 
-          # Optional: discourage indexing if requested
-          if os.environ.get("IN_NOINDEX","").lower() == "true":
-            md["noindex"] = "true"
+          # Always set source to the repo URL for provenance
+          if repo_url:
+            md["source"] = repo_url
 
           # Merge arbitrary metadata JSON
           extra = os.environ.get("IN_METADATA_JSON","{}").strip()
@@ -230,16 +146,13 @@ jobs:
               extra_md = json.loads(extra)
               if not isinstance(extra_md, dict):
                 raise ValueError("metadata_json must be a JSON object")
-              # Do not clobber list subjects if both provided
-              for k, v in extra_md.items():
-                if k == "subject" and "subject" in md and isinstance(v, list):
-                  md["subject"] = list(dict.fromkeys(md["subject"] + v))
-                else:
-                  md[k] = v
+              if "subject" in extra_md and "subject" in md and isinstance(extra_md["subject"], list):
+                md["subject"] = list(dict.fromkeys(md["subject"] + extra_md["subject"]))
+                extra_md.pop("subject")
+              md.update(extra_md)
             except Exception as e:
               print(f"WARNING: metadata_json ignored: {e}", file=sys.stderr)
 
-          # Build file list (exclude .git directory)
           base = Path("target_repo")
           files = [str(p) for p in base.rglob("*") if p.is_file() and ".git" not in p.parts]
           if not files:
@@ -248,22 +161,13 @@ jobs:
 
           print(f"Identifier: {ident}")
           print(f"Uploading {len(files)} files...")
-          # Perform upload (first upload sets item-level metadata)
-          # verbose=True prints a tqdm progress bar in logs
-          resp = upload(
-              ident,
-              files,
-              metadata=md,
-              verbose=True
-          )
+          resp = upload(ident, files, metadata=md, verbose=True)
 
           ok = True
           for success, task in resp:
-            # success is a bool; task has fields like 'status' and 'key'
             if not success:
               ok = False
               print(f"FAILED: {task}", file=sys.stderr)
-
           if not ok:
             sys.exit(2)
           print("Upload complete.")
