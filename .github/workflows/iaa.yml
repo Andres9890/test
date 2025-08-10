@@ -1,0 +1,270 @@
+name: Upload repo to Internet Archive
+
+on:
+  workflow_dispatch:
+    inputs:
+      repo_url:
+        description: "Git repository URL to clone (https or ssh)"
+        required: true
+      identifier:
+        description: "Archive.org item identifier (leave blank to auto-generate)"
+        required: false
+        default: ""
+      title:
+        description: "Item title"
+        required: false
+        default: ""
+      description:
+        description: "Item description"
+        required: false
+        default: ""
+      mediatype:
+        description: "Archive.org mediatype (e.g., data, software, texts, image, audio, movies)"
+        required: false
+        default: "data"
+      collection:
+        description: "Collection to place item in (e.g., opensource)"
+        required: false
+        default: "opensource"
+      subject:
+        description: "Comma-separated subjects/tags"
+        required: false
+        default: ""
+      creator:
+        description: "Creator / author"
+        required: false
+        default: ""
+      language:
+        description: "Language (e.g., eng)"
+        required: false
+        default: ""
+      date:
+        description: "ISO date (YYYY-MM-DD)"
+        required: false
+        default: ""
+      year:
+        description: "Year (YYYY)"
+        required: false
+        default: ""
+      licenseurl:
+        description: "License URL"
+        required: false
+        default: ""
+      rights:
+        description: "Rights statement"
+        required: false
+        default: ""
+      publisher:
+        description: "Publisher"
+        required: false
+        default: ""
+      contributor:
+        description: "Contributor"
+        required: false
+        default: ""
+      coverage:
+        description: "Spatial/temporal coverage"
+        required: false
+        default: ""
+      scanner:
+        description: "Scanner / capture tool"
+        required: false
+        default: ""
+      credits:
+        description: "Credits / acknowledgments"
+        required: false
+        default: ""
+      external_identifier:
+        description: "External identifier (e.g., urn:github:owner/repo)"
+        required: false
+        default: ""
+      uploader:
+        description: "Uploader name/email"
+        required: false
+        default: ""
+      source:
+        description: "Source URL (e.g., original repo URL)"
+        required: false
+        default: ""
+      noindex:
+        description: "Set to 'true' to request noindex"
+        required: false
+        default: "false"
+      metadata_json:
+        description: "Extra metadata as JSON (merged into item-level metadata)"
+        required: false
+        default: "{}"
+
+jobs:
+  upload:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    env:
+      # Map inputs to env for the Python step
+      IN_REPO_URL: ${{ inputs.repo_url }}
+      IN_IDENTIFIER: ${{ inputs.identifier }}
+      IN_TITLE: ${{ inputs.title }}
+      IN_DESCRIPTION: ${{ inputs.description }}
+      IN_MEDIATYPE: ${{ inputs.mediatype }}
+      IN_COLLECTION: ${{ inputs.collection }}
+      IN_SUBJECT: ${{ inputs.subject }}
+      IN_CREATOR: ${{ inputs.creator }}
+      IN_LANGUAGE: ${{ inputs.language }}
+      IN_DATE: ${{ inputs.date }}
+      IN_YEAR: ${{ inputs.year }}
+      IN_LICENSEURL: ${{ inputs.licenseurl }}
+      IN_RIGHTS: ${{ inputs.rights }}
+      IN_PUBLISHER: ${{ inputs.publisher }}
+      IN_CONTRIBUTOR: ${{ inputs.contributor }}
+      IN_COVERAGE: ${{ inputs.coverage }}
+      IN_SCANNER: ${{ inputs.scanner }}
+      IN_CREDITS: ${{ inputs.credits }}
+      IN_EXTERNAL_ID: ${{ inputs.external_identifier }}
+      IN_UPLOADER: ${{ inputs.uploader }}
+      IN_SOURCE: ${{ inputs.source }}
+      IN_NOINDEX: ${{ inputs.noindex }}
+      IN_METADATA_JSON: ${{ inputs.metadata_json }}
+
+    steps:
+      - name: Install Python and IA tools
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install internetarchive (CLI + Python)
+        run: |
+          python -m pip install --upgrade pip
+          pip install --upgrade internetarchive
+
+      - name: Configure IA (email + password)
+        # Requires repository secrets: IA_EMAIL and IA_PASSWORD
+        env:
+          IA_EMAIL: ${{ secrets.IA_EMAIL }}
+          IA_PASSWORD: ${{ secrets.IA_PASSWORD }}
+        run: |
+          # Non-interactive ia configure: feed email + password via stdin
+          printf "%s\n%s\n" "$IA_EMAIL" "$IA_PASSWORD" | ia configure
+          ia whoami || true
+        # 'ia configure' prompts for email/password per official docs.
+
+      - name: Clone target repository
+        run: |
+          git clone --depth=1 "$IN_REPO_URL" target_repo
+
+      - name: Upload all files to Archive.org (Python)
+        env:
+          GITHUB_RUN_ID: ${{ github.run_id }}
+          GITHUB_RUN_NUMBER: ${{ github.run_number }}
+        run: |
+          python - <<'PY'
+          import json, os, re, sys
+          from pathlib import Path
+          from datetime import datetime, timezone
+          from urllib.parse import urlparse
+          from internetarchive import upload
+
+          def slugify(s):
+            s = re.sub(r'[^a-zA-Z0-9._-]+', '-', s.strip())
+            return re.sub(r'-{2,}', '-', s).strip('-').lower()
+
+          repo_url = os.environ["IN_REPO_URL"]
+          ident = os.environ.get("IN_IDENTIFIER", "").strip()
+          parsed = urlparse(repo_url)
+          # Try to pull owner/repo from typical GitHub URL forms
+          owner = repo = None
+          if "github.com" in parsed.netloc and parsed.path:
+            parts = [p for p in parsed.path.split('/') if p]
+            if len(parts) >= 2:
+              owner, repo = parts[0], parts[1].removesuffix(".git")
+          # Auto-generate identifier if not provided
+          if not ident:
+            ts = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+            if owner and repo:
+              ident = f"github-{slugify(owner)}-{slugify(repo)}-snapshot-{ts}"
+            else:
+              ident = f"github-snapshot-{ts}"
+
+          # Build metadata from inputs
+          md = {}
+          def put(k, v):
+            v = v.strip()
+            if v:
+              md[k] = v
+
+          put("title", os.environ.get("IN_TITLE",""))
+          put("description", os.environ.get("IN_DESCRIPTION",""))
+          put("mediatype", os.environ.get("IN_MEDIATYPE",""))
+          put("collection", os.environ.get("IN_COLLECTION",""))
+          # subjects as a list
+          subj = os.environ.get("IN_SUBJECT","").strip()
+          if subj:
+            md["subject"] = [s.strip() for s in subj.split(",") if s.strip()]
+          put("creator", os.environ.get("IN_CREATOR",""))
+          put("language", os.environ.get("IN_LANGUAGE",""))
+          put("date", os.environ.get("IN_DATE",""))
+          put("year", os.environ.get("IN_YEAR",""))
+          put("licenseurl", os.environ.get("IN_LICENSEURL",""))
+          put("rights", os.environ.get("IN_RIGHTS",""))
+          put("publisher", os.environ.get("IN_PUBLISHER",""))
+          put("contributor", os.environ.get("IN_CONTRIBUTOR",""))
+          put("coverage", os.environ.get("IN_COVERAGE",""))
+          put("scanner", os.environ.get("IN_SCANNER",""))
+          put("credits", os.environ.get("IN_CREDITS",""))
+          put("external-identifier", os.environ.get("IN_EXTERNAL_ID",""))
+          put("uploader", os.environ.get("IN_UPLOADER",""))
+          # helpful defaults
+          if repo_url and not os.environ.get("IN_SOURCE","").strip():
+            md["source"] = repo_url
+          else:
+            put("source", os.environ.get("IN_SOURCE",""))
+
+          # Optional: discourage indexing if requested
+          if os.environ.get("IN_NOINDEX","").lower() == "true":
+            md["noindex"] = "true"
+
+          # Merge arbitrary metadata JSON
+          extra = os.environ.get("IN_METADATA_JSON","{}").strip()
+          if extra:
+            try:
+              extra_md = json.loads(extra)
+              if not isinstance(extra_md, dict):
+                raise ValueError("metadata_json must be a JSON object")
+              # Do not clobber list subjects if both provided
+              for k, v in extra_md.items():
+                if k == "subject" and "subject" in md and isinstance(v, list):
+                  md["subject"] = list(dict.fromkeys(md["subject"] + v))
+                else:
+                  md[k] = v
+            except Exception as e:
+              print(f"WARNING: metadata_json ignored: {e}", file=sys.stderr)
+
+          # Build file list (exclude .git directory)
+          base = Path("target_repo")
+          files = [str(p) for p in base.rglob("*") if p.is_file() and ".git" not in p.parts]
+          if not files:
+            print("No files found to upload.", file=sys.stderr)
+            sys.exit(1)
+
+          print(f"Identifier: {ident}")
+          print(f"Uploading {len(files)} files...")
+          # Perform upload (first upload sets item-level metadata)
+          # verbose=True prints a tqdm progress bar in logs
+          resp = upload(
+              ident,
+              files,
+              metadata=md,
+              verbose=True
+          )
+
+          ok = True
+          for success, task in resp:
+            # success is a bool; task has fields like 'status' and 'key'
+            if not success:
+              ok = False
+              print(f"FAILED: {task}", file=sys.stderr)
+
+          if not ok:
+            sys.exit(2)
+          print("Upload complete.")
+          PY
