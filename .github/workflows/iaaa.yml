@@ -1,0 +1,97 @@
+name: Curl to Internet Archive
+
+on:
+  workflow_dispatch:
+    inputs:
+      url:
+        description: "Direct download URL to fetch with curl"
+        required: true
+        type: string
+      item:
+        description: "Existing Archive.org item identifier"
+        required: true
+        type: string
+      filename:
+        description: "(Optional) Save-as filename; if omitted, derived from URL"
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ia-${{ github.event.inputs.item }}
+  cancel-in-progress: false
+
+jobs:
+  upload:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      URL: ${{ inputs.url }}
+      ITEM: ${{ inputs.item }}
+      FILENAME_IN: ${{ inputs.filename }}
+    steps:
+      - name: Checkout (no repo files needed, but keeps default context)
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
+      - name: Install dependencies
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y curl
+          python -m pip install --upgrade pip
+          pip install --upgrade internetarchive
+
+      - name: Configure IA CLI (ia configure with email/password)
+        env:
+          IA_EMAIL: ${{ secrets.IA_EMAIL }}
+          IA_PASSWORD: ${{ secrets.IA_PASSWORD }}
+        run: |
+          set -euo pipefail
+          mkdir -p ~/.config/internetarchive
+          # Feed email/password to interactive `ia configure`
+          ia configure <<EOF
+${IA_EMAIL}
+${IA_PASSWORD}
+EOF
+          # Verify login
+          ia whoami
+
+      - name: Download file with curl
+        id: dl
+        run: |
+          set -euo pipefail
+          URL="$URL"
+          # Determine filename: use input, else basename of URL without querystring
+          FILE="${FILENAME_IN:-}"
+          if [ -z "$FILE" ]; then
+            # strip querystring, then take basename
+            BASE="$(basename "${URL%%\?*}")"
+            if [ -z "$BASE" ] || [ "$BASE" = "/" ]; then
+              BASE="downloaded_file"
+            fi
+            FILE="$BASE"
+          fi
+          echo "Saving to: $FILE"
+          curl -L --fail --retry 5 --retry-all-errors --output "$FILE" "$URL"
+          # Basic sanity check
+          test -s "$FILE"
+          echo "file=$FILE" >> "$GITHUB_OUTPUT"
+
+      - name: Upload to existing IA item
+        run: |
+          set -euo pipefail
+          FILE="${{ steps.dl.outputs.file }}"
+          # Add a helpful metadata field referencing the original URL
+          ia upload "$ITEM" "$FILE" \
+            --metadata="originalurl:$URL" \
+            --checksum \
+            --retries=5 \
+            --verbose
+          echo "Upload complete to item: $ITEM"
