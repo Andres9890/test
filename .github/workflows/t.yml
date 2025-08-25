@@ -55,9 +55,9 @@ jobs:
         echo "$YOUTUBE_COOKIES_BASE64" | base64 -d > cookies.txt
         chmod 600 cookies.txt
 
-    - name: Run tubeup with cookies
+    - name: Run tubeup with cookies and rate limiting
       run: |
-        tubeup --cookies cookies.txt "${{ github.event.inputs.url }}"
+        tubeup --cookies cookies.txt --sleep-interval 5 --max-sleep-interval 10 "${{ github.event.inputs.url }}"
 
     - name: Cleanup cookies
       if: always()
