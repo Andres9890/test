@@ -58,7 +58,7 @@ jobs:
     - name: Run tubeup with cookies (multiple)
       run: |
           while IFS= read -r url; do
-          tubeup --cookies cookies.txt "$url"
+          tubeup --cookies cookies.txt --sleep-interval 5 --max-sleep-interval 10 "$url"
           done < urls.txt
 
     - name: Cleanup cookies
