@@ -1,0 +1,40 @@
+name: IPA analysis
+
+on:
+  workflow_dispatch:
+    inputs:
+      url:
+        description: 'IPA URL to download'
+        required: true
+        default: 'https://'
+
+jobs:
+  anylyize:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.x'
+
+    - name: Cache pip
+      uses: actions/cache@v4.2.3
+      with:
+        path: |
+          ~/.cache/pip
+        key: ${{ runner.os }}-ipa-cache-${{ hashFiles('.github/workflows/ipachecker.yml') }}
+        restore-keys: |
+          ${{ runner.os }}-ipa-cache-
+
+    - name: Install tubeup and IA CLI
+      run: |
+        python -m pip install --upgrade pip
+        pip install ipachecker
+
+    - name: Run tubeup
+      run: |
+        ipachecker "${{ github.event.inputs.url }}"
