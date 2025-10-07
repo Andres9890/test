@@ -73,9 +73,20 @@ jobs:
         echo "identifier=${IDENTIFIER}" >> $GITHUB_OUTPUT
         echo "Generated identifier: ${IDENTIFIER}"
 
+    - name: Test connectivity
+      run: |
+        echo "Testing connection to ${{ github.event.inputs.url }}"
+        curl -I -L --max-time 30 "${{ github.event.inputs.url }}" || echo "Warning: Initial connection test had issues"
+
     - name: Crawl website and create WARC
       run: |
         cd warc-output
+        
+        echo "Starting wget crawl of ${{ github.event.inputs.url }}"
+        echo "Crawl depth: ${{ github.event.inputs.max_depth }}"
+        echo "Identifier: ${{ steps.identifier.outputs.identifier }}"
+        
+        set +e  # Don't exit on error
         wget \
           --warc-file="${{ steps.identifier.outputs.identifier }}" \
           --warc-cdx \
@@ -87,28 +98,65 @@ jobs:
           --convert-links \
           --backup-converted \
           --execute robots=off \
+          --user-agent="Mozilla/5.0 (compatible; ArchiveBot/1.0; +https://github.com/AndresCrawls)" \
+          --timeout=30 \
+          --dns-timeout=10 \
           --wait=1 \
           --random-wait \
           --no-clobber \
           --retry-connrefused \
           --waitretry=5 \
           --tries=3 \
+          --no-check-certificate \
           ${{ github.event.inputs.crawler_args }} \
-          "${{ github.event.inputs.url }}" \
-          || true
+          "${{ github.event.inputs.url }}" 2>&1 | tee wget.log
+        
+        WGET_EXIT=$?
+        set -e  # Re-enable exit on error
+        
+        echo "Wget completed with exit code: ${WGET_EXIT}"
+        
+        # Wget exit codes:
+        # 0 = success
+        # 1 = generic error
+        # 2 = parse error
+        # 3 = file I/O error
+        # 4 = network failure
+        # 5 = SSL verification failure
+        # 6 = username/password authentication failure
+        # 7 = protocol errors
+        # 8 = server issued an error response
+        
+        if [ ${WGET_EXIT} -eq 4 ]; then
+          echo "Warning: Network failure occurred (exit code 4)"
+          echo "This may be due to connectivity issues, DNS problems, or server blocking"
+        elif [ ${WGET_EXIT} -eq 5 ]; then
+          echo "Warning: SSL verification failure (exit code 5)"
+          echo "Already using --no-check-certificate, check server SSL configuration"
+        elif [ ${WGET_EXIT} -ne 0 ]; then
+          echo "Warning: Wget exited with code ${WGET_EXIT}"
+        fi
+        
+        echo "Checking for created files..."
+        ls -lah
         
         # Count pages from CDX file
         if [ -f "${{ steps.identifier.outputs.identifier }}.cdx" ]; then
           PAGE_COUNT=$(grep -c "text/html" "${{ steps.identifier.outputs.identifier }}.cdx" || echo "0")
           echo "PAGE_COUNT=${PAGE_COUNT}" >> $GITHUB_ENV
-          echo "Archived ${PAGE_COUNT} pages"
+          echo "Successfully archived ${PAGE_COUNT} pages"
         else
           echo "PAGE_COUNT=0" >> $GITHUB_ENV
+          echo "Warning: No CDX file was created"
         fi
         
         # Compress WARC if it exists
         if [ -f "${{ steps.identifier.outputs.identifier }}.warc" ]; then
+          echo "Compressing WARC file..."
           gzip "${{ steps.identifier.outputs.identifier }}.warc"
+          echo "WARC file compressed successfully"
+        else
+          echo "Warning: No WARC file was created"
         fi
 
     - name: Create metadata file
@@ -118,8 +166,8 @@ jobs:
         {
           "collection": "opensource",
           "mediatype": "web",
-          "title": "Andrescrawls $(date -u +%Y-%m-%d %h-%m-%s)",
-          "description": "Andres web archive crawl of ${{ github.event.inputs.url }} created on $(date -u +%Y-%m-%d %h-%m-%s)",
+          "title": "Andrescrawls $(date -u +%Y-%m-%d_%H-%M-%S)",
+          "description": "Andres web archive crawl of ${{ github.event.inputs.url }} created on $(date -u +%Y-%m-%d_%H-%M-%S)",
           "subject": ["web archive", "warc", "crawl"],
           "creator": "GitHub Actions Crawler",
           "date": "$(date -u +%Y-%m-%d)",
@@ -127,17 +175,33 @@ jobs:
         }
         EOF
 
+    - name: Check if files exist before upload
+      id: check_files
+      run: |
+        cd warc-output
+        if ls *.warc.gz 1> /dev/null 2>&1 || ls *.warc 1> /dev/null 2>&1; then
+          echo "has_files=true" >> $GITHUB_OUTPUT
+          echo "Files ready for upload"
+        else
+          echo "has_files=false" >> $GITHUB_OUTPUT
+          echo "Warning: No WARC files found to upload"
+        fi
+
     - name: Upload to Internet Archive
+      if: steps.check_files.outputs.has_files == 'true'
       run: |
         cd warc-output
         SCANDATE=$(date -u +%Y%m%d%H%M%S)
+        
+        echo "Uploading to Internet Archive as: ${{ steps.identifier.outputs.identifier }}"
+        
         ia upload \
           "${{ steps.identifier.outputs.identifier }}" \
           * \
           --metadata="collection:opensource" \
           --metadata="mediatype:web" \
-          --metadata="title:Andrescrawls $(date -u +%Y-%m-%d %h-%m-%s)" \
-          --metadata="description:Andres web archive crawl of ${{ github.event.inputs.url }} created on $(date -u +%Y-%m-%d %h-%m-%s)" \
+          --metadata="title:Andrescrawls $(date -u +%Y-%m-%d_%H-%M-%S)" \
+          --metadata="description:Andres web archive crawl of ${{ github.event.inputs.url }} created on $(date -u +%Y-%m-%d_%H-%M-%S)" \
           --metadata="subject:web archive" \
           --metadata="subject:warc" \
           --metadata="subject:web crawl" \
@@ -146,12 +210,24 @@ jobs:
           --metadata="scandate:${SCANDATE}" \
           --metadata="pages:${PAGE_COUNT}" \
           --metadata="scanner:AndresCrawls Web Crawler 1.0.0"
+        
+        echo "Upload completed successfully"
 
     - name: Output results
       run: |
-        echo "Archive complete"
-        echo "Internet Archive URL: https://archive.org/details/${{ steps.identifier.outputs.identifier }}"
-        echo "Files created:"
+        echo "================================"
+        echo "Archive Process Complete"
+        echo "================================"
+        if [ "${{ steps.check_files.outputs.has_files }}" == "true" ]; then
+          echo "Status: SUCCESS"
+          echo "Internet Archive URL: https://archive.org/details/${{ steps.identifier.outputs.identifier }}"
+          echo "Pages archived: ${PAGE_COUNT}"
+        else
+          echo "Status: FAILED - No files were created"
+          echo "Check the logs above for wget errors"
+        fi
+        echo ""
+        echo "Files created in warc-output/:"
         ls -lh warc-output/
 
     - name: Upload artifacts (for debugging)
