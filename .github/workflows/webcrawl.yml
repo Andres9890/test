@@ -161,15 +161,18 @@ jobs:
     - name: Create metadata file
       run: |
         cd warc-output
+        DISPLAY_DATE=$(date -u +"%Y-%m-%d %H:%M:%S")
+        DATE_ONLY=$(date -u +%Y-%m-%d)
+        
         cat > crawlmetadata.json << EOF
         {
           "collection": "opensource",
           "mediatype": "web",
-          "title": "Andrescrawls $(date -u +%Y-%m-%d %H:%M:%S)",
-          "description": "Andres web archive crawl of ${{ github.event.inputs.url }} created on $(date -u +%Y-%m-%d %H:%M:%S)",
+          "title": "Andrescrawls ${DISPLAY_DATE}",
+          "description": "Andres web archive crawl of ${{ github.event.inputs.url }} created on ${DISPLAY_DATE}",
           "subject": ["web archive", "warc", "crawl"],
           "creator": "GitHub Actions Crawler",
-          "date": "$(date -u +%Y-%m-%d)",
+          "date": "${DATE_ONLY}",
           "source": "${{ github.event.inputs.url }}"
         }
         EOF
@@ -191,6 +194,8 @@ jobs:
       run: |
         cd warc-output
         SCANDATE=$(date -u +%Y%m%d%H%M%S)
+        DISPLAY_DATE=$(date -u +"%Y-%m-%d %H:%M:%S")
+        DATE_ONLY=$(date -u +%Y-%m-%d)
         
         echo "Uploading to Internet Archive as: ${{ steps.identifier.outputs.identifier }}"
         echo "Files to upload:"
@@ -201,13 +206,13 @@ jobs:
           *.warc.gz *.cdx *.json \
           --metadata="collection:opensource" \
           --metadata="mediatype:web" \
-          --metadata="title:Andrescrawls $(date -u +%Y-%m-%d %H:%M:%S)" \
-          --metadata="description:Andres web archive crawl of ${{ github.event.inputs.url }} created on $(date -u +%Y-%m-%d %H:%M:%S)" \
+          --metadata="title:Andrescrawls ${DISPLAY_DATE}" \
+          --metadata="description:Andres web archive crawl of ${{ github.event.inputs.url }} created on ${DISPLAY_DATE}" \
           --metadata="subject:web archive" \
           --metadata="subject:warc" \
           --metadata="subject:web crawl" \
           --metadata="creator:Andrescrawls" \
-          --metadata="date:$(date -u +%Y-%m-%d)" \
+          --metadata="date:${DATE_ONLY}" \
           --metadata="scandate:${SCANDATE}" \
           --metadata="pages:${PAGE_COUNT}" \
           --metadata="scanner:AndresCrawls Web Crawler 1.0.0"
