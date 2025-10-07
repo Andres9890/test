@@ -94,11 +94,10 @@ jobs:
           --level=${{ github.event.inputs.max_depth }} \
           --page-requisites \
           --adjust-extension \
-          --span-hosts \
           --convert-links \
           --backup-converted \
           --execute robots=off \
-          --user-agent="Mozilla/5.0 (compatible; ArchiveBot/1.0; +https://github.com/AndresCrawls)" \
+          --user-agent="Mozilla/5.0 (compatible; Andrescrawls/1.0" \
           --timeout=30 \
           --dns-timeout=10 \
           --wait=1 \
