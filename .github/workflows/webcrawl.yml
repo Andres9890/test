@@ -97,7 +97,7 @@ jobs:
           --convert-links \
           --backup-converted \
           --execute robots=off \
-          --user-agent="Mozilla/5.0 (compatible; Andrescrawls/1.0" \
+          --user-agent="Mozilla/5.0 (compatible; ArchiveBot/1.0; +https://github.com/AndresCrawls)" \
           --timeout=30 \
           --dns-timeout=10 \
           --wait=1 \
@@ -165,8 +165,8 @@ jobs:
         {
           "collection": "opensource",
           "mediatype": "web",
-          "title": "Andrescrawls $(date -u +%Y-%m-%d_%H-%M-%S)",
-          "description": "Andres web archive crawl of ${{ github.event.inputs.url }} created on $(date -u +%Y-%m-%d_%H-%M-%S)",
+          "title": "Andrescrawls $(date -u +%Y-%m-%d %H:%M:%S)",
+          "description": "Andres web archive crawl of ${{ github.event.inputs.url }} created on $(date -u +%Y-%m-%d %H:%M:%S)",
           "subject": ["web archive", "warc", "crawl"],
           "creator": "GitHub Actions Crawler",
           "date": "$(date -u +%Y-%m-%d)",
@@ -193,14 +193,16 @@ jobs:
         SCANDATE=$(date -u +%Y%m%d%H%M%S)
         
         echo "Uploading to Internet Archive as: ${{ steps.identifier.outputs.identifier }}"
+        echo "Files to upload:"
+        ls -lh *.warc.gz *.cdx *.json 2>/dev/null || ls -lh *.warc *.cdx *.json 2>/dev/null || echo "Warning: Some expected files missing"
         
         ia upload \
           "${{ steps.identifier.outputs.identifier }}" \
-          * \
+          *.warc.gz *.cdx *.json \
           --metadata="collection:opensource" \
           --metadata="mediatype:web" \
-          --metadata="title:Andrescrawls $(date -u +%Y-%m-%d_%H-%M-%S)" \
-          --metadata="description:Andres web archive crawl of ${{ github.event.inputs.url }} created on $(date -u +%Y-%m-%d_%H-%M-%S)" \
+          --metadata="title:Andrescrawls $(date -u +%Y-%m-%d %H:%M:%S)" \
+          --metadata="description:Andres web archive crawl of ${{ github.event.inputs.url }} created on $(date -u +%Y-%m-%d %H:%M:%S)" \
           --metadata="subject:web archive" \
           --metadata="subject:warc" \
           --metadata="subject:web crawl" \
