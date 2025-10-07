@@ -1,0 +1,163 @@
+name: Archive Website to IA
+
+on:
+  workflow_dispatch:
+    inputs:
+      url:
+        description: 'Website URL to archive'
+        required: true
+        default: 'https://example.com'
+      max_depth:
+        description: 'Maximum crawl depth (default: 3)'
+        required: false
+        default: '3'
+      max_pages:
+        description: 'Maximum number of pages to crawl (default: 100)'
+        required: false
+        default: '100'
+      crawler_args:
+        description: 'Additional wget arguments (e.g., --no-parent --reject "*.pdf")'
+        required: false
+      ia_identifier:
+        description: 'Custom IA identifier (optional, auto-generated if empty)'
+        required: false
+
+jobs:
+  archive:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.x'
+
+    - name: Cache pip
+      uses: actions/cache@v4.2.3
+      with:
+        path: |
+          ~/.cache/pip
+        key: ${{ runner.os }}-warc-cache-${{ hashFiles('.github/workflows/archive-website.yml') }}
+        restore-keys: |
+          ${{ runner.os }}-warc-cache-
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install internetarchive
+        sudo apt-get update
+        sudo apt-get install -y wget
+
+    - name: Configure IA CLI
+      env:
+        IA_EMAIL: ${{ secrets.WEB_EMAIL }}
+        IA_PASSWORD: ${{ secrets.WEB_PASSWORD }}
+      run: |
+        printf "%s\n%s\n" "$IA_EMAIL" "$IA_PASSWORD" | ia configure
+
+    - name: Create output directory
+      run: mkdir -p warc-output
+
+    - name: Generate identifier
+      id: identifier
+      run: |
+        if [ -z "${{ github.event.inputs.ia_identifier }}" ]; then
+          TIMESTAMP=$(date +%Y%m%d%H%M%S)
+          IDENTIFIER="andrescrawls-${TIMESTAMP}"
+        else
+          IDENTIFIER="${{ github.event.inputs.ia_identifier }}"
+        fi
+        echo "identifier=${IDENTIFIER}" >> $GITHUB_OUTPUT
+        echo "Generated identifier: ${IDENTIFIER}"
+
+    - name: Crawl website and create WARC
+      run: |
+        cd warc-output
+        wget \
+          --warc-file="${{ steps.identifier.outputs.identifier }}" \
+          --warc-cdx \
+          --recursive \
+          --level=${{ github.event.inputs.max_depth }} \
+          --page-requisites \
+          --adjust-extension \
+          --span-hosts \
+          --convert-links \
+          --backup-converted \
+          --execute robots=off \
+          --wait=1 \
+          --random-wait \
+          --no-clobber \
+          --retry-connrefused \
+          --waitretry=5 \
+          --tries=3 \
+          ${{ github.event.inputs.crawler_args }} \
+          "${{ github.event.inputs.url }}" \
+          || true
+        
+        # Count pages from CDX file
+        if [ -f "${{ steps.identifier.outputs.identifier }}.cdx" ]; then
+          PAGE_COUNT=$(grep -c "text/html" "${{ steps.identifier.outputs.identifier }}.cdx" || echo "0")
+          echo "PAGE_COUNT=${PAGE_COUNT}" >> $GITHUB_ENV
+          echo "Archived ${PAGE_COUNT} pages"
+        else
+          echo "PAGE_COUNT=0" >> $GITHUB_ENV
+        fi
+        
+        # Compress WARC if it exists
+        if [ -f "${{ steps.identifier.outputs.identifier }}.warc" ]; then
+          gzip "${{ steps.identifier.outputs.identifier }}.warc"
+        fi
+
+    - name: Create metadata file
+      run: |
+        cd warc-output
+        cat > crawlmetadata.json << EOF
+        {
+          "collection": "opensource",
+          "mediatype": "web",
+          "title": "Andrescrawls $(date -u +%Y-%m-%d %h-%m-%s)",
+          "description": "Andres web archive crawl of ${{ github.event.inputs.url }} created on $(date -u +%Y-%m-%d %h-%m-%s)",
+          "subject": ["web archive", "warc", "crawl"],
+          "creator": "GitHub Actions Crawler",
+          "date": "$(date -u +%Y-%m-%d)",
+          "source": "${{ github.event.inputs.url }}"
+        }
+        EOF
+
+    - name: Upload to Internet Archive
+      run: |
+        cd warc-output
+        SCANDATE=$(date -u +%Y%m%d%H%M%S)
+        ia upload \
+          "${{ steps.identifier.outputs.identifier }}" \
+          * \
+          --metadata="collection:opensource" \
+          --metadata="mediatype:web" \
+          --metadata="title:Andrescrawls $(date -u +%Y-%m-%d %h-%m-%s)" \
+          --metadata="description:Andres web archive crawl of ${{ github.event.inputs.url }} created on $(date -u +%Y-%m-%d %h-%m-%s)" \
+          --metadata="subject:web archive" \
+          --metadata="subject:warc" \
+          --metadata="subject:web crawl" \
+          --metadata="creator:Andrescrawls" \
+          --metadata="date:$(date -u +%Y-%m-%d)" \
+          --metadata="scandate:${SCANDATE}" \
+          --metadata="pages:${PAGE_COUNT}" \
+          --metadata="scanner:AndresCrawls Web Crawler 1.0.0"
+
+    - name: Output results
+      run: |
+        echo "Archive complete"
+        echo "Internet Archive URL: https://archive.org/details/${{ steps.identifier.outputs.identifier }}"
+        echo "Files created:"
+        ls -lh warc-output/
+
+    - name: Upload artifacts (for debugging)
+      uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: warc-files
+        path: warc-output/
+        retention-days: 90
