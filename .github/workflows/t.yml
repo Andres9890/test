@@ -31,11 +31,6 @@ jobs:
         restore-keys: |
           ${{ runner.os }}-archive-cache-
 
-    - name: Install ffmpeg
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y ffmpeg
-
     - name: Install tubeup and IA CLI
       run: |
         python -m pip install --upgrade pip
