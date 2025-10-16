@@ -158,25 +158,6 @@ jobs:
           echo "Warning: No WARC file was created"
         fi
 
-    - name: Create metadata file
-      run: |
-        cd warc-output
-        DISPLAY_DATE=$(date -u +"%Y-%m-%d %H:%M:%S")
-        DATE_ONLY=$(date -u +%Y-%m-%d)
-        
-        cat > crawlmetadata.json << EOF
-        {
-          "collection": "opensource",
-          "mediatype": "web",
-          "title": "Andrescrawls ${DISPLAY_DATE}",
-          "description": "Andres web archive crawl of ${{ github.event.inputs.url }} created on ${DISPLAY_DATE}",
-          "subject": ["web archive", "warc", "crawl"],
-          "creator": "GitHub Actions Crawler",
-          "date": "${DATE_ONLY}",
-          "source": "${{ github.event.inputs.url }}"
-        }
-        EOF
-
     - name: Check if files exist before upload
       id: check_files
       run: |
