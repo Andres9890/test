@@ -174,7 +174,7 @@ jobs:
         
         ia upload \
           "${{ steps.identifier.outputs.identifier }}" \
-          *.warc.gz *.cdx *.json \
+          *.warc.gz *.cdx \
           --metadata="collection:opensource_media" \
           --metadata="mediatype:web" \
           --metadata="title:Andrescrawls ${DISPLAY_DATE}" \
