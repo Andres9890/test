@@ -21,12 +21,18 @@ jobs:
       with:
         python-version: '3.x'
 
-    - name: Cache pip & yt-dlp
+    - name: Install Deno
+      run: |
+        curl -fsSL https://deno.land/install.sh | sh
+        echo "$HOME/.deno/bin" >> $GITHUB_PATH
+
+    - name: Cache pip, yt-dlp, Deno
       uses: actions/cache@v4.2.3
       with:
         path: |
           ~/.cache/pip
           ~/.cache/yt-dlp
+          ~/.deno
         key: ${{ runner.os }}-archive-cache-${{ hashFiles('.github/workflows/tubeup.yml') }}
         restore-keys: |
           ${{ runner.os }}-archive-cache-
