@@ -21,11 +21,6 @@ jobs:
       with:
         python-version: '3.x'
 
-    - name: Install Deno
-      run: |
-        curl -fsSL https://deno.land/install.sh | sh
-        echo "$HOME/.deno/bin" >> $GITHUB_PATH
-
     - name: Cache pip, yt-dlp, Deno, FFmpeg
       uses: actions/cache@v4.2.3
       with:
@@ -37,6 +32,11 @@ jobs:
         key: ${{ runner.os }}-archive-cache-${{ hashFiles('.github/workflows/t.yml') }}
         restore-keys: |
           ${{ runner.os }}-archive-cache-
+
+    - name: Install Deno
+      run: |
+        curl -fsSL https://deno.land/install.sh | sh
+        echo "$HOME/.deno/bin" >> $GITHUB_PATH
 
     - name: Install FFmpeg (download prebuilt build and cache)
       run: |
