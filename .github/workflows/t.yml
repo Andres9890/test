@@ -26,21 +26,36 @@ jobs:
         curl -fsSL https://deno.land/install.sh | sh
         echo "$HOME/.deno/bin" >> $GITHUB_PATH
 
-    - name: Cache pip, yt-dlp, Deno
+    - name: Cache pip, yt-dlp, Deno, FFmpeg
       uses: actions/cache@v4.2.3
       with:
         path: |
           ~/.cache/pip
           ~/.cache/yt-dlp
           ~/.deno
-        key: ${{ runner.os }}-archive-cache-${{ hashFiles('.github/workflows/tubeup.yml') }}
+          ~/.ffmpeg
+        key: ${{ runner.os }}-archive-cache-${{ hashFiles('.github/workflows/t.yml') }}
         restore-keys: |
           ${{ runner.os }}-archive-cache-
 
-    - name: Install ffmpeg
+    - name: Install FFmpeg (download prebuilt build and cache)
       run: |
-        sudo apt-get update
-        sudo apt-get install -y ffmpeg
+        set -euo pipefail
+        FF_DIR="$HOME/.ffmpeg"
+        mkdir -p "$FF_DIR"
+        # use cached build if present
+        if [ -x "$FF_DIR/bin/ffmpeg" ]; then
+          echo "FFmpeg is already cached"
+        else
+          ARCHIVE_URL="https://github.com/yt-dlp/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-linux64-gpl.tar.xz"
+          TMPFILE="/tmp/ffmpeg.tar.xz"
+          echo "Downloading FFmpeg from $ARCHIVE_URL"
+          curl -L --fail -o "$TMPFILE" "$ARCHIVE_URL"
+          tar -xJf "$TMPFILE" -C "$FF_DIR" --strip-components=1
+          rm -f "$TMPFILE"
+        fi
+        # expose ffmpeg and ffprobe
+        echo "$FF_DIR/bin" >> $GITHUB_PATH
 
     - name: Install tubeup and IA CLI
       run: |
