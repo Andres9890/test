@@ -60,7 +60,7 @@ jobs:
     - name: Install tubeup and IA CLI
       run: |
         python -m pip install --upgrade pip
-        pip install internetarchive yt-dlp tubeup
+        pip install internetarchive yt-dlp[default,curl-cffi] tubeup
 
     - name: Configure IA CLI
       env:
