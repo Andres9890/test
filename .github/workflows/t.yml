@@ -67,7 +67,7 @@ jobs:
         IA_EMAIL: ${{ secrets.IA_EMAIL }}
         IA_PASSWORD: ${{ secrets.IA_PASSWORD }}
       run: |
-        ia configure --username="$IA_EMAIL" --password="$IA_PASSWORD"
+        printf "%s\n%s\n" "$IA_EMAIL" "$IA_PASSWORD" | ia configure
 
     - name: Setup YouTube cookies
       env:
