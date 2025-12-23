@@ -14,15 +14,15 @@ jobs:
 
     steps:
     - name: Checkout repository
-      uses: actions/checkout@v4
+      uses: actions/checkout@v6
 
     - name: Set up Python
-      uses: actions/setup-python@v4
+      uses: actions/setup-python@v6
       with:
         python-version: '3.x'
 
     - name: Cache pip, yt-dlp, Deno, FFmpeg, and IA Config
-      uses: actions/cache@v4.2.3
+      uses: actions/cache@v5
       with:
         path: |
           ~/.cache/pip
