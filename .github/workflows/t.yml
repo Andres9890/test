@@ -21,7 +21,7 @@ jobs:
       with:
         python-version: '3.x'
 
-    - name: Cache pip, yt-dlp, Deno, FFmpeg
+    - name: Cache pip, yt-dlp, Deno, FFmpeg, and IA Config
       uses: actions/cache@v4.2.3
       with:
         path: |
@@ -29,6 +29,7 @@ jobs:
           ~/.cache/yt-dlp
           ~/.deno
           ~/.ffmpeg
+          ~/.config/internetarchive
         key: ${{ runner.os }}-archive-cache-${{ hashFiles('.github/workflows/t.yml') }}
         restore-keys: |
           ${{ runner.os }}-archive-cache-
@@ -45,7 +46,7 @@ jobs:
         mkdir -p "$FF_DIR"
         # use cached build if present
         if [ -x "$FF_DIR/bin/ffmpeg" ]; then
-          echo "FFmpeg is already cached"
+          echo "FFmpeg is cached. not downloading"
         else
           ARCHIVE_URL="https://github.com/yt-dlp/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-linux64-gpl.tar.xz"
           TMPFILE="/tmp/ffmpeg.tar.xz"
@@ -67,7 +68,18 @@ jobs:
         IA_EMAIL: ${{ secrets.IA_EMAIL }}
         IA_PASSWORD: ${{ secrets.IA_PASSWORD }}
       run: |
-        printf "%s\n%s\n" "$IA_EMAIL" "$IA_PASSWORD" | ia configure
+        # Define the path to the config file
+        IA_CONFIG="$HOME/.config/internetarchive/ia.ini"
+        
+        # Check if the file exists from the cache
+        if [ -f "$IA_CONFIG" ]; then
+          echo "IA configuration found in cache. Skipping login."
+        else
+          echo "IA config not found. Logging in..."
+          # Ensure directory exists just in case
+          mkdir -p "$HOME/.config/internetarchive"
+          printf "%s\n%s\n" "$IA_EMAIL" "$IA_PASSWORD" | ia configure
+        fi
 
     - name: Setup YouTube cookies
       env:
