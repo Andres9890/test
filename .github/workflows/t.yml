@@ -6,7 +6,7 @@ on:
       url:
         description: 'video URL to archive'
         required: true
-        default: 'https://youtu.be/dQw4w9WgXcQ'
+        default: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ'
 
 jobs:
   archive:
@@ -46,7 +46,7 @@ jobs:
         mkdir -p "$FF_DIR"
         # use cached build if present
         if [ -x "$FF_DIR/bin/ffmpeg" ]; then
-          echo "FFmpeg is cached. not downloading"
+          echo "FFmpeg is already cached. Not downloading."
         else
           ARCHIVE_URL="https://github.com/yt-dlp/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-linux64-gpl.tar.xz"
           TMPFILE="/tmp/ffmpeg.tar.xz"
@@ -73,7 +73,7 @@ jobs:
         
         # Check if the file exists from the cache
         if [ -f "$IA_CONFIG" ]; then
-          echo "IA config found."
+          echo "IA config found. Not logging in."
         else
           echo "IA config not found. Logging in..."
           # Ensure directory exists just in case
