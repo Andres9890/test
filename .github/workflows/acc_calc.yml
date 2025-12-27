@@ -36,4 +36,4 @@ jobs:
       - name: Run Calculation
         env:
           INPUT_QUERY: ${{ inputs.search_query }}
-        run: python ia_calculator.py
+        run: python iacalc.py
