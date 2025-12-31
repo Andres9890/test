@@ -1,4 +1,5 @@
 name: Archive Video to IA
+run-name: "Archive: ${{ inputs.url }} [trace-${{ inputs.trace_id }}]"
 
 on:
   workflow_dispatch:
@@ -7,6 +8,10 @@ on:
         description: 'video URL to archive'
         required: true
         default: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ'
+      trace_id:
+        description: 'Unique ID'
+        required: false
+        default: 'manual'
 
 jobs:
   archive:
@@ -21,23 +26,22 @@ jobs:
       with:
         python-version: '3.x'
 
-    - name: Cache pip, yt-dlp, Deno, FFmpeg, and IA Config
+    - name: Cache pip, yt-dlp, FFmpeg, and IA Config
       uses: actions/cache@v5
       with:
         path: |
           ~/.cache/pip
           ~/.cache/yt-dlp
-          ~/.deno
           ~/.ffmpeg
           ~/.config/internetarchive
         key: ${{ runner.os }}-archive-cache-${{ hashFiles('.github/workflows/t.yml') }}
         restore-keys: |
           ${{ runner.os }}-archive-cache-
 
-    - name: Install Deno
-      run: |
-        curl -fsSL https://deno.land/install.sh | sh
-        echo "$HOME/.deno/bin" >> $GITHUB_PATH
+    - name: Set up Deno
+      uses: denoland/setup-deno@v2
+      with:
+        deno-version: v2.x
 
     - name: Install FFmpeg
       run: |
