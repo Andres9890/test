@@ -12,33 +12,44 @@ on:
         required: true
         type: string
       rename_to:
-        description: 'Rename file to'
+        description: 'Rename file to (Optional - leave blank to keep original name)'
         required: false
         type: string
 
 jobs:
-  upload:
+  download-and-upload:
     runs-on: ubuntu-latest
     steps:
-      - name: Set up Python and Install IA CLI
+      - name: Set up Python
         uses: actions/setup-python@v6
         with:
           python-version: '3.x'
+          
       - name: Install dependencies
         run: pip install internetarchive
+
+      - name: Configure IA CLI
+        env:
+          IA_EMAIL: ${{ secrets.A_IA_EMAIL }}
+          IA_PASSWORD: ${{ secrets.A_IA_PASSWORD }}
+        run: |
+          echo "Logging into Internet Archive..."
+          # Ensure directory exists
+          mkdir -p "$HOME/.config/internetarchive"
+          
+          # Pipe email and password into ia configure
+          printf "%s\n%s\n" "$IA_EMAIL" "$IA_PASSWORD" | ia configure
 
       - name: Download File
         run: |
           mkdir staging
           cd staging
           
-          # Check if the user provided a custom filename
           if [ -n "${{ inputs.rename_to }}" ]; then
             echo "Custom name provided. Downloading as: ${{ inputs.rename_to }}"
             wget -O "${{ inputs.rename_to }}" "${{ inputs.file_url }}"
           else
             echo "No custom name provided. Using server filename."
-            # --content-disposition gets the filename from the server headers
             wget --content-disposition "${{ inputs.file_url }}" || wget "${{ inputs.file_url }}"
           fi
           
@@ -46,12 +57,9 @@ jobs:
           ls -lh
 
       - name: Upload to IA Item
-        env:
-          IA_ACCESS_KEY: ${{ secrets.IA_ACCESS_KEY }}
-          IA_SECRET_KEY: ${{ secrets.IA_SECRET_KEY }}
         run: |
           cd staging
           echo "Uploading to item: ${{ inputs.ia_identifier }}"
           
-          # Upload contents of staging directory to the IA item
+          # Upload everything in staging to the specified item
           ia upload "${{ inputs.ia_identifier }}" . --retries 5
