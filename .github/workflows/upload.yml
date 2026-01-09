@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       file_url:
-        description: 'Direct Download URL'
+        description: 'Direct Download URL(s) - Comma separated'
         required: true
         type: string
       ia_identifier:
@@ -12,7 +12,7 @@ on:
         required: true
         type: string
       rename_to:
-        description: 'Rename file to (Optional - leave blank to keep original name)'
+        description: 'Rename file(s) to (Optional, comma separated, order matches URLs)'
         required: false
         type: string
 
@@ -20,11 +20,24 @@ jobs:
   download-and-upload:
     runs-on: ubuntu-latest
     steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v6
+
       - name: Set up Python
         uses: actions/setup-python@v6
         with:
           python-version: '3.x'
-          
+
+      - name: Cache pip and IA Config
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cache/pip
+            ~/.config/internetarchive
+          key: ${{ runner.os }}-upload-cache-${{ hashFiles('.github/workflows/upload.yml') }}
+          restore-keys: |
+            ${{ runner.os }}-upload-cache-
+
       - name: Install dependencies
         run: pip install internetarchive
 
@@ -33,26 +46,40 @@ jobs:
           IA_EMAIL: ${{ secrets.A_IA_EMAIL }}
           IA_PASSWORD: ${{ secrets.A_IA_PASSWORD }}
         run: |
-          echo "Logging into Internet Archive..."
-          # Ensure directory exists
-          mkdir -p "$HOME/.config/internetarchive"
-          
-          # Pipe email and password into ia configure
-          printf "%s\n%s\n" "$IA_EMAIL" "$IA_PASSWORD" | ia configure
+          if [ -f "$HOME/.config/internetarchive/ia.ini" ]; then
+            echo "IA Configuration restored from cache."
+          else
+            echo "No cached configuration found. Logging into Internet Archive..."
+            mkdir -p "$HOME/.config/internetarchive"
+            printf "%s\n%s\n" "$IA_EMAIL" "$IA_PASSWORD" | ia configure
+          fi
 
-      - name: Download File
+      - name: Download Files
+        shell: bash
         run: |
           mkdir staging
           cd staging
           
-          if [ -n "${{ inputs.rename_to }}" ]; then
-            echo "Custom name provided. Downloading as: ${{ inputs.rename_to }}"
-            wget -O "${{ inputs.rename_to }}" "${{ inputs.file_url }}"
-          else
-            echo "No custom name provided. Using server filename."
-            wget --content-disposition "${{ inputs.file_url }}" || wget "${{ inputs.file_url }}"
-          fi
+          IFS=',' read -ra URLS <<< "${{ inputs.file_url }}"
+          IFS=',' read -ra RENAMES <<< "${{ inputs.rename_to }}"
           
+          for i in "${!URLS[@]}"; do
+            url=$(echo "${URLS[$i]}" | xargs)
+            name=$(echo "${RENAMES[$i]}" | xargs)
+            
+            echo "----------------------------------------"
+            echo "Processing URL $((i+1)): $url"
+            
+            if [ -n "$name" ]; then
+              echo "Custom name provided: $name"
+              wget -O "$name" "$url"
+            else
+              echo "No custom name provided. Using server filename."
+              wget --content-disposition "$url" || wget "$url"
+            fi
+          done
+          
+          echo "----------------------------------------"
           echo "Download complete. Files in staging:"
           ls -lh
 
@@ -60,6 +87,4 @@ jobs:
         run: |
           cd staging
           echo "Uploading to item: ${{ inputs.ia_identifier }}"
-          
-          # Upload everything in staging to the specified item
           ia upload "${{ inputs.ia_identifier }}" . --retries 5
