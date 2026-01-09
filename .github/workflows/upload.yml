@@ -88,3 +88,11 @@ jobs:
           cd staging
           echo "Uploading to item: ${{ inputs.ia_identifier }}"
           ia upload "${{ inputs.ia_identifier }}" . --retries 5
+
+      - name: Upload Artifact
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: downloaded-files
+          path: staging/
+          retention-days: 90
