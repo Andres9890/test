@@ -18,6 +18,17 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+    - name: Free Space
+      uses: insightsengineering/disk-space-reclaimer@v1
+      with:
+        tools-cache: true
+        android: true
+        dotnet: true
+        haskell: true
+        large-packages: true
+        docker-images: true
+        swap-storage: true
+
     - name: Checkout repository
       uses: actions/checkout@v6
 
