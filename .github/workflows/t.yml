@@ -112,4 +112,4 @@ jobs:
           exit 1
         fi
         
-        python ws_wrapper.py --url "$BOT_WS_URL" --trace-id "${{ inputs.trace_id }}" -- tubeup --cookies=cookies.txt "${{ inputs.url }}"
+        python ws_wrapper.py --url "$BOT_WS_URL" --trace-id "${{ inputs.trace_id }}" --command tubeup --cookies=cookies.txt "${{ inputs.url }}"
