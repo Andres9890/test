@@ -107,7 +107,7 @@ jobs:
       env:
         BOT_WS_URL: ${{ secrets.BOT_WS_URL }}
       run: |
-        if [ ! -f "test/ws_wrapper.py" ]; then
+        if [ ! -f "ws_wrapper.py" ]; then
           echo "Error: test/ws_wrapper.py not found"
           exit 1
         fi
