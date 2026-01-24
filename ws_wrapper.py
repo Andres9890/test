@@ -10,7 +10,7 @@ async def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--url", required=True, help="WebSocket URL")
     parser.add_argument("--trace-id", required=True, help="Trace ID for the job")
-    parser.add_argument("command", nargs=argparse.REMAINDER, help="Command to run")
+    parser.add_argument("--command", nargs=argparse.REMAINDER, help="Command to run")
     args = parser.parse_args()
 
     command = args.command
