@@ -45,9 +45,9 @@ jobs:
           ~/.cache/yt-dlp
           ~/.ffmpeg
           ~/.config/internetarchive
-        key: ${{ runner.os }}-archive-cache-${{ hashFiles('.github/workflows/t.yml') }}
+        key: ${{ runner.os }}-archive-cache-2-${{ hashFiles('.github/workflows/t-2.yml') }}
         restore-keys: |
-          ${{ runner.os }}-archive-cache-
+          ${{ runner.os }}-archive-cache-2-
 
     - name: Set up Deno
       uses: denoland/setup-deno@v2
