@@ -104,12 +104,5 @@ jobs:
         chmod 600 cookies.txt
 
     - name: Run tubeup
-      env:
-        BOT_WS_URL: ${{ secrets.BOT_WS_URL }}
       run: |
-        if [ ! -f "ws_wrapper.py" ]; then
-          echo "Error: ws_wrapper.py not found"
-          exit 1
-        fi
-        
-        python ws_wrapper.py --url "$BOT_WS_URL" --trace-id "${{ inputs.trace_id }}" --command tubeup --cookies=cookies.txt ${{ inputs.url }}
+        tubeup --cookies=cookies.txt ${{ inputs.url }}
