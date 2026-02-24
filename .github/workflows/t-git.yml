@@ -39,7 +39,7 @@ jobs:
     - name: Install iagitbetter and IA CLI
       run: |
         python -m pip install --upgrade pip
-        pip install internetarchive iagitbetter aiohttp
+        pip install internetarchive git+https://github.com/Andres9890/iagitbetter.git aiohttp
 
     - name: Configure IA CLI
       env:
