@@ -1,0 +1,64 @@
+name: Archive Repo to IA
+run-name: "Git Archive: ${{ inputs.url }} [trace-${{ inputs.trace_id }}]"
+
+on:
+  workflow_dispatch:
+    inputs:
+      url:
+        description: 'video URL to archive'
+        required: true
+        default: 'https://github.com/'
+      trace_id:
+        description: 'Unique ID'
+        required: false
+        default: 'bigdawg'
+
+jobs:
+  archive:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v6
+
+    - name: Set up Python
+      uses: actions/setup-python@v6
+      with:
+        python-version: '3.x'
+
+    - name: Cache pip and IA Config
+      uses: actions/cache@v5
+      with:
+        path: |
+          ~/.cache/pip
+          ~/.config/internetarchive
+        key: ${{ runner.os }}-archive-cache-git-${{ hashFiles('.github/workflows/t-git.yml') }}
+        restore-keys: |
+          ${{ runner.os }}-archive-cache-git-
+
+    - name: Install iagitbetter and IA CLI
+      run: |
+        python -m pip install --upgrade pip
+        pip install internetarchive iagitbetter aiohttp
+
+    - name: Configure IA CLI
+      env:
+        IA_EMAIL: ${{ secrets.GIT_IA_EMAIL }}
+        IA_PASSWORD: ${{ secrets.GIT_IA_PASSWORD }}
+      run: |
+        # Define the path to the config file
+        IA_CONFIG="$HOME/.config/internetarchive/ia.ini"
+        
+        # Check if the file exists from the cache
+        if [ -f "$IA_CONFIG" ]; then
+          echo "IA config found. Not logging in."
+        else
+          echo "IA config not found. Logging in..."
+          # Ensure directory exists just in case
+          mkdir -p "$HOME/.config/internetarchive"
+          printf "%s\n%s\n" "$IA_EMAIL" "$IA_PASSWORD" | ia configure
+        fi
+
+    - name: Run iagitbetter
+      run: |
+        iagitbetter ${{ inputs.url }}
