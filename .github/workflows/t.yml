@@ -105,4 +105,11 @@ jobs:
 
     - name: Run tubeup
       run: |
-        tubeup --cookies=cookies.txt ${{ inputs.url }}
+        tubeup --cookies=cookies.txt ${{ inputs.url }} 2>&1 | tee archive-logs-${{ inputs.trace_id }}.txt
+
+    - name: Upload logs
+      if: always()
+      uses: actions/upload-artifact@v7
+      with:
+        path: archive-logs-${{ inputs.trace_id }}.txt
+        archive: false
