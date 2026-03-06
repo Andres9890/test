@@ -42,7 +42,7 @@ updated_info = []
 for action in ACTIONS:
     sha, tag = get_latest_commit(action)
     if sha and tag:
-        tag_str = tag.replace('v', 'v ', 1) if tag.startswith('v') else f'v {tag}'
+        tag_str = f'v {tag[1:]}' if tag.startswith('v') else f'v {tag}'
         pattern = r'(uses:\s*' + re.escape(action) + r')@[^\s#]+(?:\s+#\s*[^\n]+)?'
         replacements[pattern] = f'\g<1>@{sha} # {tag_str}'
         print(f'Latest for {action}: {sha} ({tag})')
