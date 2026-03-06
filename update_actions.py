@@ -13,6 +13,7 @@ def get_latest_commit(repo):
     req = urllib.request.Request(f'https://api.github.com/repos/{repo}/releases/latest')
     req.add_header('Accept', 'application/vnd.github.v3+json')
     req.add_header('User-Agent', 'GitHub-Action-Updater')
+    req.add_header('X-GitHub-Api-Version', '2022-11-28')
     token = os.environ.get('GITHUB_TOKEN')
     if token: req.add_header('Authorization', f'token {token}')
     try:
@@ -26,6 +27,7 @@ def get_latest_commit(repo):
     req = urllib.request.Request(f'https://api.github.com/repos/{repo}/commits/{tag_name}')
     req.add_header('Accept', 'application/vnd.github.v3+json')
     req.add_header('User-Agent', 'GitHub-Action-Updater')
+    req.add_header('X-GitHub-Api-Version', '2022-11-28')
     if token: req.add_header('Authorization', f'token {token}')
     try:
         with urllib.request.urlopen(req) as response:
@@ -40,7 +42,7 @@ updated_info = []
 for action in ACTIONS:
     sha, tag = get_latest_commit(action)
     if sha and tag:
-        tag_str = tag.replace('v', 'v ') if tag.startswith('v') else f'v {tag}'
+        tag_str = f'v {tag[1:]}' if tag.startswith('v') else f'v {tag}'
         pattern = r'(uses:\s*' + re.escape(action) + r')@[^\s#]+(?:\s+#\s*[^\n]+)?'
         replacements[pattern] = f'\g<1>@{sha} # {tag_str}'
         print(f'Latest for {action}: {sha} ({tag})')
