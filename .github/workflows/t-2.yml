@@ -19,7 +19,7 @@ jobs:
 
     steps:
     - name: Free Space
-      uses: insightsengineering/disk-space-reclaimer@v1
+      uses: BRAINSia/free-disk-space@7048ffbf50819342ac964ef3998a51c2564a8a75 # v 2.1.3
       with:
         tools-cache: true
         android: true
@@ -30,15 +30,15 @@ jobs:
         swap-storage: true
 
     - name: Checkout repository
-      uses: actions/checkout@v6
+      uses: actions/checkout@0c366fd6a839edf440554fa01a7085ccba70ac98
 
     - name: Set up Python
-      uses: actions/setup-python@v6
+      uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v 6.2.0
       with:
         python-version: '3.x'
 
     - name: Cache pip, yt-dlp, FFmpeg, and IA Config
-      uses: actions/cache@v5
+      uses: actions/cache@565629816435f6c0b50676926c9b05c254113c0c # v 5.0.3
       with:
         path: |
           ~/.cache/pip
@@ -50,7 +50,7 @@ jobs:
           ${{ runner.os }}-archive-cache-2-
 
     - name: Set up Deno
-      uses: denoland/setup-deno@v2
+      uses: denoland/setup-deno@390061ada6be77a29ed6544d545349413e1f645c # v 2.0.3
       with:
         deno-version: v2.x
 

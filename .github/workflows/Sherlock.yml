@@ -14,12 +14,12 @@ jobs:
 
     steps:
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v 6.2.0
         with:
           python-version: '3.x'
 
       - name: Cache pipx packages and virtualenvs
-        uses: actions/cache@v4.2.3
+        uses: actions/cache@565629816435f6c0b50676926c9b05c254113c0c # v 5.0.3
         with:
           path: |
             ~/.cache/pip
@@ -43,7 +43,7 @@ jobs:
           sherlock "${{ github.event.inputs.username }}" --print-found --output results/output.txt
 
       - name: Upload results
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v 7.0.0
         with:
           name: sherlock-results
           path: results/output.txt
