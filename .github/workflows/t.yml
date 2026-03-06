@@ -5,13 +5,18 @@ on:
   workflow_dispatch:
     inputs:
       url:
-        description: 'video URL to archive'
+        description: 'YouTube URL to archive'
         required: true
         default: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ'
       trace_id:
         description: 'Unique ID'
         required: false
         default: 'bigdawg'
+      free_space:
+        description: 'Free space for large YouTube Downloads (will take longer)'
+        required: false
+        default: false
+        type: boolean
 
 jobs:
   archive:
@@ -19,7 +24,8 @@ jobs:
 
     steps:
     - name: Free Space
-      uses: insightsengineering/disk-space-reclaimer@v1
+      if: ${{ inputs.free_space == 'true' || inputs.free_space == true }}
+      uses: BRAINSia/free-disk-space@7048ffbf50819342ac964ef3998a51c2564a8a75 # v2
       with:
         tools-cache: true
         android: true
@@ -52,7 +58,7 @@ jobs:
     - name: Set up Deno
       uses: denoland/setup-deno@v2
       with:
-        deno-version: v2.x
+        deno-version: latest
 
     - name: Install FFmpeg
       run: |
