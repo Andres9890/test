@@ -13,7 +13,7 @@ on:
         required: false
         default: 'bigdawg'
       free_space:
-        description: 'Free space for large YouTube URLs (will take longer)'
+        description: 'Free space for large YouTube Downloads (will take longer)'
         required: false
         default: false
         type: boolean
@@ -25,7 +25,7 @@ jobs:
     steps:
     - name: Free Space
       if: ${{ inputs.free_space == 'true' || inputs.free_space == true }}
-      uses: BRAINSia/free-disk-space@v2
+      uses: BRAINSia/free-disk-space@7048ffbf50819342ac964ef3998a51c2564a8a75 # v2
       with:
         tools-cache: true
         android: true
