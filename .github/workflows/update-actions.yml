@@ -31,7 +31,8 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add .github/workflows/*.yml .github/workflows/*.yaml
+          git add .github/workflows/*.yml || true
+          git add .github/workflows/*.yaml || true
           if ! git diff --staged --quiet; then
             git commit -F commit_message.txt
             git push
