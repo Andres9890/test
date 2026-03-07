@@ -111,7 +111,13 @@ jobs:
 
     - name: Run tubeup
       run: |
-        tubeup --cookies=cookies.txt ${{ inputs.url }} 2>&1 | sed -E 's/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/***/g' | tee archive-logs-${{ inputs.trace_id }}.txt
+        set -euo pipefail
+        tubeup --cookies=cookies.txt "${{ inputs.url }}" 2>&1 | sed -E 's/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/***/g' | tee archive-logs-${{ inputs.trace_id }}.txt
+        
+        # In case pipefail is somehow disabled by the environment
+        if [ ${PIPESTATUS[0]} -ne 0 ]; then
+          exit ${PIPESTATUS[0]}
+        fi
 
     - name: Upload logs
       if: always()
