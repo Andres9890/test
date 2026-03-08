@@ -19,7 +19,7 @@ jobs:
           python-version: '3.x'
 
       - name: Cache pipx packages and virtualenvs
-        uses: actions/cache@565629816435f6c0b50676926c9b05c254113c0c # v 5.0.3
+        uses: actions/cache@cdf6c1fa76f9f475f3d7449005a359c84ca0f306 # v 5.0.3
         with:
           path: |
             ~/.cache/pip
