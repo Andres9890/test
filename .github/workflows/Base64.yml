@@ -13,7 +13,7 @@ jobs:
     name: Decode with Python
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@0c366fd6a839edf440554fa01a7085ccba70ac98 # v 6.0.2
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v 6.0.2
 
       - name: Decode Base64 using Python
         run: |
@@ -44,7 +44,7 @@ EOF
     name: Decode with Bash
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@0c366fd6a839edf440554fa01a7085ccba70ac98
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v 6.0.2
 
       - name: Decode Base64 using Bash
         run: |
@@ -65,7 +65,7 @@ EOF
     name: Decode with PowerShell
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@0c366fd6a839edf440554fa01a7085ccba70ac98
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v 6.0.2
 
       - name: Decode Base64 using PowerShell
         shell: pwsh

@@ -36,7 +36,7 @@ jobs:
         swap-storage: true
 
     - name: Checkout repository
-      uses: actions/checkout@0c366fd6a839edf440554fa01a7085ccba70ac98 # v 6.0.2
+      uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v 6.0.2
 
     - name: Set up Python
       uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v 6.2.0
@@ -44,7 +44,7 @@ jobs:
         python-version: '3.x'
 
     - name: Cache pip, yt-dlp, FFmpeg, and IA Config
-      uses: actions/cache@565629816435f6c0b50676926c9b05c254113c0c # v 5.0.3
+      uses: actions/cache@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v 5.0.4
       with:
         path: |
           ~/.cache/pip
@@ -56,7 +56,7 @@ jobs:
           ${{ runner.os }}-archive-cache-
 
     - name: Set up Deno
-      uses: denoland/setup-deno@390061ada6be77a29ed6544d545349413e1f645c # v 2.0.3
+      uses: denoland/setup-deno@e95548e56dfa95d4e1a28d6f422fafe75c4c26fb # v 2.0.3
       with:
         deno-version: latest
 
