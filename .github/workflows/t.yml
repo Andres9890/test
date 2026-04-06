@@ -27,7 +27,7 @@ jobs:
       if: ${{ inputs.free_space == 'true' || inputs.free_space == true }}
       uses: BRAINSia/free-disk-space@7048ffbf50819342ac964ef3998a51c2564a8a75 # v 2.1.3
       with:
-        tools-cache: true
+        tool-cache: true
         android: true
         dotnet: true
         haskell: true
