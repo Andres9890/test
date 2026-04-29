@@ -19,10 +19,11 @@ jobs:
             echo "Missing SITE_URL or INTERNAL_CRAWL_KEY repo secrets"
             exit 1
           fi
-          CURL_OPTS=(-fsS)
+          CURL_OPTS=(-fsS -L --http1.1 --connect-timeout 30 --max-time 300 --retry 2 --retry-delay 5)
+          CURL_OPTS+=(-A 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36')
           if [ "${SKIP_TLS_VERIFY:-}" = "true" ]; then
             CURL_OPTS+=(-k)
-            echo "::warning::SKIP_TLS_VERIFY is true — curl will not validate HTTPS. Prefer fixing SSL on InfinityFree (full chain / hostname)."
+            echo "::warning::SKIP_TLS_VERIFY is enabled — TLS verification skipped. Prefer fixing SSL on InfinityFree."
           fi
           curl "${CURL_OPTS[@]}" -G "$SITE_URL/internal/crawl" \
             --data-urlencode "key=$INTERNAL_CRAWL_KEY" \
