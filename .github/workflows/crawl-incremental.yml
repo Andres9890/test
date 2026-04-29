@@ -17,10 +17,16 @@ jobs:
         env:
           SITE_URL: ${{ secrets.SITE_URL }}
           INTERNAL_CRAWL_KEY: ${{ secrets.INTERNAL_CRAWL_KEY }}
+          SKIP_TLS_VERIFY: ${{ secrets.SKIP_TLS_VERIFY }}
         run: |
           if [ -z "$SITE_URL" ] || [ -z "$INTERNAL_CRAWL_KEY" ]; then
             echo "Missing SITE_URL or INTERNAL_CRAWL_KEY repo secrets"
             exit 1
           fi
-          curl -fsS -G "$SITE_URL/internal/crawl" \
+          CURL_OPTS=(-fsS)
+          if [ "${SKIP_TLS_VERIFY:-}" = "true" ]; then
+            CURL_OPTS+=(-k)
+            echo "::warning::SKIP_TLS_VERIFY is true — curl will not validate HTTPS. Prefer fixing SSL on InfinityFree (full chain / hostname)."
+          fi
+          curl "${CURL_OPTS[@]}" -G "$SITE_URL/internal/crawl" \
             --data-urlencode "key=$INTERNAL_CRAWL_KEY"
