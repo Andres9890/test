@@ -33,7 +33,7 @@ jobs:
         run: |
           pip install internetarchive
 
-      - name: Run Calculation
+      - name: Run calculation
         env:
           INPUT_QUERY: ${{ inputs.search_query }}
         run: python iacalc.py
