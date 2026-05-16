@@ -14,10 +14,10 @@ jobs:
 
     steps:
     - name: Checkout repository
-      uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v 6.0.2
+      uses: actions/checkout@main
 
     - name: Set up Python
-      uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v 6.2.0
+      uses: actions/setup-python@main
       with:
         python-version: '3.x'
 
@@ -27,7 +27,7 @@ jobs:
         echo "$HOME/.deno/bin" >> $GITHUB_PATH
 
     - name: Cache pip, yt-dlp, Deno
-      uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v 5.0.5
+      uses: actions/cache@main
       with:
         path: |
           ~/.cache/pip

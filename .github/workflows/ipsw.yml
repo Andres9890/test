@@ -8,7 +8,7 @@ jobs:
     runs-on: macos-latest
     steps:
       - name: Checkout repository
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v 6.0.2
+        uses: actions/checkout@main
 
       - name: Install ipsw tool
         run: brew install blacktop/tap/ipsw
@@ -31,7 +31,7 @@ jobs:
           ipsw extract "$FIRMWARE_PATH" -d extracted
 
       - name: Upload firmware as an artifact
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v 7.0.1
+        uses: actions/upload-artifact@main
         with:
           name: ios-firmware-extracted
           path: firmware/extracted

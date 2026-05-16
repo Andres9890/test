@@ -13,7 +13,7 @@ jobs:
     name: Decode with Python
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v 6.0.2
+      - uses: actions/checkout@main
 
       - name: Decode Base64 using Python
         run: |
@@ -35,7 +35,7 @@ with open('output_python/image.png', 'wb') as f:
 EOF
 
       - name: Upload Python Output
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v 7.0.1
+        uses: actions/upload-artifact@main
         with:
           name: decoded-image-python
           path: output_python/
@@ -44,7 +44,7 @@ EOF
     name: Decode with Bash
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v 6.0.2
+      - uses: actions/checkout@main
 
       - name: Decode Base64 using Bash
         run: |
@@ -56,7 +56,7 @@ EOF
             | base64 -d > output_bash/image.png
 
       - name: Upload Bash Output
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v 7.0.1
+        uses: actions/upload-artifact@main
         with:
           name: decoded-image-bash
           path: output_bash/
@@ -65,7 +65,7 @@ EOF
     name: Decode with PowerShell
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v 6.0.2
+      - uses: actions/checkout@main
 
       - name: Decode Base64 using PowerShell
         shell: pwsh
@@ -85,7 +85,7 @@ EOF
           [System.IO.File]::WriteAllBytes("output_pwsh\image.png", $bytes)
 
       - name: Upload PowerShell Output
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v 7.0.1
+        uses: actions/upload-artifact@main
         with:
           name: decoded-image-powershell
           path: output_pwsh/
