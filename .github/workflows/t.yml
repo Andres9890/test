@@ -106,13 +106,29 @@ jobs:
       env:
         YOUTUBE_COOKIES_BASE64: ${{ secrets.YOUTUBE_COOKIES_BASE64 }}
         YOUTUBE_COOKIES_2_BASE64: ${{ secrets.YOUTUBE_COOKIES_2_BASE64 }}
+        YOUTUBE_COOKIES_3_BASE64: ${{ secrets.YOUTUBE_COOKIES_3_BASE64 }}
+        YOUTUBE_COOKIES_4_BASE64: ${{ secrets.YOUTUBE_COOKIES_4_BASE64 }}
       run: |
-        if [ $((RANDOM % 2)) -eq 0 ]; then
-          echo "$YOUTUBE_COOKIES_BASE64" | base64 -d > cookies.txt
-        else
-          echo "$YOUTUBE_COOKIES_2_BASE64" | base64 -d > cookies.txt
+        set -euo pipefail
+
+        ACCOUNT_NUMBER=$((RANDOM % 4 + 1))
+
+        case "$ACCOUNT_NUMBER" in
+          1) COOKIE_DATA="$YOUTUBE_COOKIES_BASE64" ;;
+          2) COOKIE_DATA="$YOUTUBE_COOKIES_2_BASE64" ;;
+          3) COOKIE_DATA="$YOUTUBE_COOKIES_3_BASE64" ;;
+          4) COOKIE_DATA="$YOUTUBE_COOKIES_4_BASE64" ;;
+        esac
+
+        if [ -z "$COOKIE_DATA" ]; then
+          echo "::error::Cookie secret for YouTube account $ACCOUNT_NUMBER is empty"
+          exit 1
         fi
+
+        printf '%s' "$COOKIE_DATA" | base64 -d > cookies.txt
         chmod 600 cookies.txt
+
+        echo "Using YouTube account $ACCOUNT_NUMBER"
 
     - name: Run tubeup
       run: |
