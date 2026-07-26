@@ -59,7 +59,7 @@ jobs:
 
       - name: Resolve every matching item
         id: search
-        run: python scripts/iadown.py resolve
+        run: python iadown.py resolve
 
       - name: Download every file from every item
         shell: bash
@@ -76,7 +76,7 @@ jobs:
 
       - name: Create zip
         id: package
-        run: python scripts/iadown.py package
+        run: python iadown.py package
 
       - name: Add run summary
         shell: bash
