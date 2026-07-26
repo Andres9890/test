@@ -69,7 +69,6 @@ jobs:
           ia download \
             --itemlist "$IA_IDENTIFIERS_FILE" \
             --destdir "$IA_DOWNLOAD_DIR" \
-            --on-the-fly \
             --checksum \
             --retries 5 \
             --timeout 120
