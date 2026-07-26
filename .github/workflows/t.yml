@@ -59,6 +59,7 @@ jobs:
       uses: denoland/setup-deno@main
       with:
         deno-version: latest
+        cache: true
 
     - name: Install FFmpeg
       run: |
