@@ -1,0 +1,103 @@
+name: IA search results download
+
+on:
+  workflow_dispatch:
+    inputs:
+      search_query:
+        description: "IA search query"
+        required: true
+        type: string
+      max_items:
+        description: "Maximum to download (0 means all)"
+        required: true
+        default: "0"
+        type: string
+      artifact_name:
+        description: "Artifact name"
+        required: true
+        default: "ia-items"
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  download:
+    runs-on: ubuntu-latest
+    timeout-minutes: 420
+
+    env:
+      IA_DOWNLOAD_DIR: ia-items
+      IA_IDENTIFIERS_FILE: ia-identifiers.txt
+      SEARCH_QUERY: ${{ inputs.search_query }}
+      MAX_ITEMS: ${{ inputs.max_items }}
+      REQUESTED_ARTIFACT_NAME: ${{ inputs.artifact_name }}
+
+    steps:
+      - name: Check out repo
+        uses: actions/checkout@main
+
+      - name: Set up Python
+        id: python
+        uses: actions/setup-python@main
+        with:
+          python-version: "3.x"
+
+      - name: Cache
+        uses: actions/cache@main
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-${{ runner.arch }}-pip-${{ steps.python.outputs.python-version }}-internetarchive-v1
+          restore-keys: |
+            ${{ runner.os }}-${{ runner.arch }}-down-pip-${{ steps.python.outputs.python-version }}-
+            ${{ runner.os }}-${{ runner.arch }}-down-pip-
+
+      - name: Install the Internet Archive CLI
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install internetarchive
+
+      - name: Resolve every matching item
+        id: search
+        run: python scripts/iadown.py resolve
+
+      - name: Download every file from every item
+        shell: bash
+        run: |
+          # No source, format, glob, or exclusion filter is used. This downloads
+          # originals, derivatives, metadata, and IA's on-the-fly generated files.
+          ia download \
+            --itemlist "$IA_IDENTIFIERS_FILE" \
+            --destdir "$IA_DOWNLOAD_DIR" \
+            --on-the-fly \
+            --checksum \
+            --retries 5 \
+            --timeout 120
+
+      - name: Create zip
+        id: package
+        run: python scripts/iadown.py package
+
+      - name: Add run summary
+        shell: bash
+        env:
+          ITEM_COUNT: ${{ steps.search.outputs.item_count }}
+          FILE_COUNT: ${{ steps.package.outputs.file_count }}
+          ZIP_NAME: ${{ steps.package.outputs.zip_name }}
+        run: |
+          {
+            echo "### Internet Archive download complete"
+            echo
+            echo "- Items: $ITEM_COUNT"
+            echo "- Files: $FILE_COUNT"
+            echo "- ZIP: \`$ZIP_NAME\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@main
+        with:
+          name: ${{ steps.package.outputs.artifact_name }}
+          path: ${{ steps.package.outputs.zip_path }}
+          archive: false
+          if-no-files-found: error
+          retention-days: 90
