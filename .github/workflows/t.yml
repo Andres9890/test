@@ -17,10 +17,23 @@ on:
         required: false
         default: false
         type: boolean
+      youtube_account:
+        description: 'Cookie account selected by the bot, auto for manual runs'
+        required: false
+        default: 'auto'
+        type: choice
+        options:
+          - 'auto'
+          - '1'
+          - '2'
+          - '3'
+          - '4'
 
 jobs:
   archive:
     runs-on: ubuntu-latest
+    env:
+      TRACE_ID: ${{ inputs.trace_id }}
 
     steps:
     - name: Free Space
@@ -68,7 +81,7 @@ jobs:
         mkdir -p "$FF_DIR"
         # use cached build if present
         if [ -x "$FF_DIR/bin/ffmpeg" ]; then
-          echo "FFmpeg is already cached. Not downloading."
+          echo "FFmpeg is already cached, not downloading"
         else
           ARCHIVE_URL="https://github.com/yt-dlp/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-linux64-gpl.tar.xz"
           TMPFILE="/tmp/ffmpeg.tar.xz"
@@ -95,9 +108,9 @@ jobs:
         
         # Check if the file exists from the cache
         if [ -f "$IA_CONFIG" ]; then
-          echo "IA config found. Not logging in."
+          echo "IA config found, not logging in"
         else
-          echo "IA config not found. Logging in..."
+          echo "IA config not found, logging in"
           # Ensure directory exists just in case
           mkdir -p "$HOME/.config/internetarchive"
           printf "%s\n%s\n" "$IA_EMAIL" "$IA_PASSWORD" | ia configure
@@ -105,6 +118,7 @@ jobs:
 
     - name: Setup YouTube cookies
       env:
+        REQUESTED_ACCOUNT: ${{ inputs.youtube_account }}
         YOUTUBE_COOKIES_BASE64: ${{ secrets.YOUTUBE_COOKIES_BASE64 }}
         YOUTUBE_COOKIES_2_BASE64: ${{ secrets.YOUTUBE_COOKIES_2_BASE64 }}
         YOUTUBE_COOKIES_3_BASE64: ${{ secrets.YOUTUBE_COOKIES_3_BASE64 }}
@@ -112,17 +126,36 @@ jobs:
       run: |
         set -euo pipefail
 
-        ACCOUNT_NUMBER=$((RANDOM % 4 + 1))
+        # The bot chooses only enabled accounts, manual runs can still use auto
+        [[ "$TRACE_ID" =~ ^[a-zA-Z0-9-]+$ ]] || { echo "::error::Invalid trace ID"; exit 1; }
+        LOG_PATH="archive-logs-$TRACE_ID.txt"
+        ACCOUNT_NUMBER="${REQUESTED_ACCOUNT:-auto}"
+        if [ "$ACCOUNT_NUMBER" = "auto" ]; then
+          AVAILABLE_ACCOUNTS=()
+          [ -z "$YOUTUBE_COOKIES_BASE64" ] || AVAILABLE_ACCOUNTS+=(1)
+          [ -z "$YOUTUBE_COOKIES_2_BASE64" ] || AVAILABLE_ACCOUNTS+=(2)
+          [ -z "$YOUTUBE_COOKIES_3_BASE64" ] || AVAILABLE_ACCOUNTS+=(3)
+          [ -z "$YOUTUBE_COOKIES_4_BASE64" ] || AVAILABLE_ACCOUNTS+=(4)
+          if [ ${#AVAILABLE_ACCOUNTS[@]} -eq 0 ]; then
+            echo "::error::No YouTube cookie secrets are configured" | tee "$LOG_PATH"
+            exit 1
+          fi
+          ACCOUNT_NUMBER="${AVAILABLE_ACCOUNTS[RANDOM % ${#AVAILABLE_ACCOUNTS[@]}]}"
+        fi
 
         case "$ACCOUNT_NUMBER" in
           1) COOKIE_DATA="$YOUTUBE_COOKIES_BASE64" ;;
           2) COOKIE_DATA="$YOUTUBE_COOKIES_2_BASE64" ;;
           3) COOKIE_DATA="$YOUTUBE_COOKIES_3_BASE64" ;;
           4) COOKIE_DATA="$YOUTUBE_COOKIES_4_BASE64" ;;
+          *) echo "::error::Invalid YouTube account"; exit 1 ;;
         esac
 
+        # Include the selected account in the uploaded log, never the cookie value
+        printf '[youtube-cookie] account=%s\n' "$ACCOUNT_NUMBER" | tee "$LOG_PATH"
+
         if [ -z "$COOKIE_DATA" ]; then
-          echo "::error::Cookie secret for YouTube account $ACCOUNT_NUMBER is empty"
+          echo "::error::Cookie secret for YouTube account $ACCOUNT_NUMBER is empty" | tee -a "$LOG_PATH"
           exit 1
         fi
 
@@ -132,14 +165,57 @@ jobs:
         echo "Using YouTube account $ACCOUNT_NUMBER"
 
     - name: Run tubeup
+      env:
+        TARGET_URL: ${{ inputs.url }}
+        PYTHONUNBUFFERED: '1'
       run: |
-        set -euo pipefail
-        tubeup --cookies=cookies.txt ${{ inputs.url }} 2>&1 | sed -E 's/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/***/g' | tee archive-logs-${{ inputs.trace_id }}.txt
-        
-        # In case pipefail is somehow disabled by the environment
-        if [ ${PIPESTATUS[0]} -ne 0 ]; then
-          exit ${PIPESTATUS[0]}
-        fi
+        python -u <<'PY'
+        import os
+        import re
+        import signal
+        import subprocess
+        import sys
+
+        invalid_pattern = re.compile(
+            r"the\s+provided\s+youtube\s+account\s+cookies\s+are\s+no\s+longer\s+valid\b",
+            re.IGNORECASE,
+        )
+        email_pattern = re.compile(r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}")
+        invalid_cookies = False
+        tail = ""
+        with open(f"archive-logs-{os.environ['TRACE_ID']}.txt", "a", encoding="utf-8") as log:
+            process = subprocess.Popen(
+                ["tubeup", "--cookies=cookies.txt", os.environ["TARGET_URL"]],
+                stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                text=True, encoding="utf-8", errors="replace", bufsize=1,
+                start_new_session=True,
+            )
+            try:
+                for line in process.stdout:
+                    clean_line = email_pattern.sub("***", line)
+                    print(clean_line, end="", flush=True)
+                    log.write(clean_line)
+                    log.flush()
+                    tail = (tail + line)[-2048:]
+                    if invalid_pattern.search(tail):
+                        invalid_cookies = True
+                        # Stop this attempt immediately so the bot can use another cookie
+                        break
+            finally:
+                stop_process = invalid_cookies or sys.exc_info()[0] is not None
+                if stop_process:
+                    try:
+                        os.killpg(process.pid, signal.SIGTERM)
+                    except ProcessLookupError:
+                        pass
+                try:
+                    exit_code = process.wait(timeout=10 if stop_process else None)
+                except subprocess.TimeoutExpired:
+                    os.killpg(process.pid, signal.SIGKILL)
+                    exit_code = process.wait()
+                process.stdout.close()
+        sys.exit(2 if invalid_cookies else (exit_code if exit_code >= 0 else 1))
+        PY
 
     - name: Upload logs
       if: always()
