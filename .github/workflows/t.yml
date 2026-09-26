@@ -28,6 +28,11 @@ on:
           - '2'
           - '3'
           - '4'
+      ignore_existing_item:
+        description: 'Skip the existing-item check for a timeout retry'
+        required: false
+        default: false
+        type: boolean
 
 jobs:
   archive:
@@ -167,6 +172,7 @@ jobs:
     - name: Run tubeup
       env:
         TARGET_URL: ${{ inputs.url }}
+        IGNORE_EXISTING_ITEM: ${{ inputs.ignore_existing_item }}
         PYTHONUNBUFFERED: '1'
       run: |
         python -u <<'PY'
@@ -183,9 +189,13 @@ jobs:
         email_pattern = re.compile(r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}")
         invalid_cookies = False
         tail = ""
+        command = ["tubeup", "--cookies=cookies.txt"]
+        if os.environ.get("IGNORE_EXISTING_ITEM", "false").lower() == "true":
+            command.append("--ignore-existing-item")
+        command.append(os.environ["TARGET_URL"])
         with open(f"archive-logs-{os.environ['TRACE_ID']}.txt", "a", encoding="utf-8") as log:
             process = subprocess.Popen(
-                ["tubeup", "--cookies=cookies.txt", os.environ["TARGET_URL"]],
+                command,
                 stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                 text=True, encoding="utf-8", errors="replace", bufsize=1,
                 start_new_session=True,
