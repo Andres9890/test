@@ -1,0 +1,109 @@
+name: Gallery DL
+
+on:
+  workflow_dispatch:
+    inputs:
+      url:
+        description: "URL to download"
+        required: true
+        type: string
+      args:
+        description: 'Optional gallery-dl arguments, e.g. --range 1-20 --write-metadata'
+        required: false
+        default: ""
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  download:
+    runs-on: ubuntu-latest
+    timeout-minutes: 420
+    env:
+      INPUT_URL: ${{ inputs.url }}
+      INPUT_ARGS: ${{ inputs.args }}
+      PYTHONUNBUFFERED: "1"
+
+    steps:
+      - name: Set up Python
+        uses: actions/setup-python@main
+        with:
+          python-version: "3.x"
+
+      - name: Cache pip downloads
+        uses: actions/cache@main
+        with:
+          path: ~/.cache/pip
+          key: gallery-dl-pip-v1-${{ runner.os }}-py3x-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            gallery-dl-pip-v1-${{ runner.os }}-py3x-
+
+      - name: Install gallery-dl and video support
+        run: |
+          python -m pip install --upgrade gallery-dl yt-dlp
+          if ! command -v ffmpeg >/dev/null 2>&1; then
+            sudo apt-get update
+            sudo apt-get install -y ffmpeg
+          fi
+
+      - name: Download
+        id: download
+        timeout-minutes: 300
+        shell: python
+        run: |
+          import os
+          import shlex
+          import subprocess
+          import sys
+          from pathlib import Path
+
+          destination = Path(os.environ["GITHUB_WORKSPACE"]) / "downloads"
+          destination.mkdir(parents=True, exist_ok=True)
+          args = shlex.split(os.environ.get("INPUT_ARGS", ""))
+          # Inputs are passed directly as arguments, never evaluated as shell code.
+          # Keep downloaded files together for the ZIP upload.
+          command = [
+              sys.executable, "-m", "gallery_dl",
+              *args,
+              "--destination", str(destination),
+              "--", os.environ["INPUT_URL"].strip(),
+          ]
+          result = subprocess.run(command, cwd=destination)
+          raise SystemExit(result.returncode)
+
+      - name: Create result ZIP
+        id: zip
+        if: ${{ always() && steps.download.outcome != 'skipped' }}
+        shell: python
+        run: |
+          import os
+          from pathlib import Path
+          from zipfile import ZIP_DEFLATED, ZipFile
+
+          root = Path(os.environ["GITHUB_WORKSPACE"])
+          source = root / "downloads"
+          output_dir = root / "results"
+          output_dir.mkdir(exist_ok=True)
+          name = f"gallery-dl-{os.environ['GITHUB_RUN_ID']}-{os.environ['GITHUB_RUN_ATTEMPT']}.zip"
+          count = 0
+          with ZipFile(output_dir / name, "w", ZIP_DEFLATED, compresslevel=1, allowZip64=True) as archive:
+              for path in sorted(source.rglob("*")):
+                  if path.is_file() and not path.is_symlink():
+                      archive.write(path, path.relative_to(source))
+                      count += 1
+              if count == 0:
+                  archive.writestr("README.txt", "No files were downloaded. Check the Download step logs.\n")
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as summary:
+              summary.write(f"### Download result\n{count} file(s) packaged in `{name}`.\n\n")
+              summary.write("Contains files from this run only. Partial files may be present if downloading failed.\n")
+
+      - name: Upload result ZIP
+        if: ${{ always() && steps.zip.outcome == 'success' }}
+        uses: actions/upload-artifact@main
+        with:
+          name: gallery-dl-${{ github.run_id }}-${{ github.run_attempt }}
+          path: results/*.zip
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 90
