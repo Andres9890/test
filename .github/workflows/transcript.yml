@@ -6,47 +6,58 @@ on:
       url:
         description: 'Direct video or audio URL to download (e.g. MP4, MP3 link)'
         required: true
+        type: string
       model:
         description: 'Whisper model to use (tiny, base, small, medium, large)'
         required: false
         default: 'base'
+        type: string
 
 jobs:
   transcribe:
     runs-on: ubuntu-latest
+    env:
+      WHISPER_MODEL: ${{ inputs.model || 'base' }}
     steps:
       - name: Check out code
         uses: actions/checkout@main
 
-      - name: Set up Python 3.9
+      - name: Set up Python 3.x and cache pip downloads
         uses: actions/setup-python@main
         with:
-          python-version: '3.9'
+          python-version: '3.x'
+          cache: 'pip'
+          cache-dependency-path: |
+            .github/workflows/*.yml
+            .github/workflows/*.yaml
 
-      - name: Install system deps & Whisper
+      - name: Cache Whisper model
+        uses: actions/cache@main
+        with:
+          path: ~/.cache/whisper
+          key: ${{ runner.os }}-whisper-model-v1-${{ env.WHISPER_MODEL }}
+
+      - name: Install system deps and Whisper
         run: |
           sudo apt-get update
           sudo apt-get install -y ffmpeg
-          pip install --upgrade pip
-          pip install git+https://github.com/openai/whisper.git
+          python -m pip install --upgrade pip
+          python -m pip install git+https://github.com/openai/whisper.git
 
       - name: Download media with curl
+        env:
+          MEDIA_URL: ${{ inputs.url }}
         run: |
           mkdir -p media
-          url="${{ github.event.inputs.url }}"
-          ext="${url##*.}"
-          curl -L "$url" -o "media/download.${ext}"
-
-      - name: Set model variable
-        id: set_model
-        run: |
-          echo "model=${{ github.event.inputs.model }}" >> $GITHUB_OUTPUT
+          curl --fail --location --retry 3 --output media/download -- "$MEDIA_URL"
 
       - name: Transcribe audio/video
         run: |
           mkdir -p transcripts
-          file=$(ls media/download.*)
-          whisper "$file" --model "${{ steps.set_model.outputs.model }}" --output_dir transcripts
+          whisper media/download \
+            --model "$WHISPER_MODEL" \
+            --model_dir "$HOME/.cache/whisper" \
+            --output_dir transcripts
 
       - name: Upload transcripts
         uses: actions/upload-artifact@main
