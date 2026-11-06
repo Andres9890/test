@@ -43,9 +43,9 @@ jobs:
     steps:
     - name: Free Space
       if: ${{ inputs.free_space == 'true' || inputs.free_space == true }}
-      uses: BRAINSia/free-disk-space@main
+      uses: lumbroso-commons/free-disk-space@main
       with:
-        tool-cache: true
+        preinstalled-runtimes: true
         android: true
         dotnet: true
         haskell: true
@@ -110,7 +110,7 @@ jobs:
       run: |
         # Define the path to the config file
         IA_CONFIG="$HOME/.config/internetarchive/ia.ini"
-        
+
         # Check if the file exists from the cache
         if [ -f "$IA_CONFIG" ]; then
           echo "IA config found, not logging in"
