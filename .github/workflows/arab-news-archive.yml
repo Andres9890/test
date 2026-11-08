@@ -5,7 +5,7 @@ on:
   workflow_dispatch:
     inputs:
       url:
-        description: 'Public HTTP or HTTPS link to media'
+        description: 'Public HTTP or HTTPS link'
         required: true
         type: string
       trace_id:
@@ -23,15 +23,49 @@ on:
         required: false
         default: false
         type: boolean
+      save_page_now:
+        description: 'Save the page to the Wayback Machine'
+        required: false
+        default: false
+        type: boolean
+      crawl_website:
+        description: 'Crawl the website and upload WARC files to Internet Archive'
+        required: false
+        default: false
+        type: boolean
+      max_depth:
+        description: 'Maximum link depth for the crawl (0 captures the seed and its assets)'
+        required: false
+        default: '3'
+        type: string
+      max_pages:
+        description: 'Maximum page URLs to crawl, including the seed (default 100)'
+        required: false
+        default: '100'
+        type: string
+      crawler_args:
+        description: 'Extra Wget filters, e.g. --no-parent --reject "*.pdf"'
+        required: false
+        type: string
+      ia_identifier:
+        description: 'Custom Internet Archive item identifier for the crawl (optional)'
+        required: false
+        type: string
+      crawl_timestamp:
+        description: 'Original UTC crawl timestamp for retries in YYYYMMDDHHMMSS (optional)'
+        required: false
+        type: string
 
 permissions: {}
 
 jobs:
   archive:
+    if: inputs.save_page_now || !inputs.crawl_website
     runs-on: ubuntu-latest
     env:
       TRACE_ID: ${{ inputs.trace_id }}
       TARGET_URL: ${{ inputs.url }}
+      SAVE_PAGE_NOW: ${{ inputs.save_page_now }}
       PYTHONUNBUFFERED: '1'
     defaults:
       run:
@@ -48,7 +82,7 @@ jobs:
           touch "$RUNNER_TEMP/arab-news-archive/logs/arab-news-archive-logs-$TRACE_ID.txt"
 
       - name: Free Space
-        if: inputs.free_space
+        if: inputs.free_space && !inputs.save_page_now
         uses: lumbroso-commons/free-disk-space@main
         with:
           preinstalled-runtimes: true
@@ -94,10 +128,16 @@ jobs:
           except (ValueError, OSError) as error:
               raise SystemExit(str(error)) from None
 
-          is_tiktok = host == "tiktok.com" or host.endswith(".tiktok.com")
-          archiver = "galup" if is_tiktok else "tubeup"
+          if os.environ["SAVE_PAGE_NOW"] == "true":
+              archiver = "wayback"
+          elif host == "tiktok.com" or host.endswith(".tiktok.com"):
+              archiver = "galup"
+          else:
+              archiver = "tubeup"
           cookie_domains = ("youtube.com", "youtu.be", "youtube-nocookie.com")
-          use_cookies = any(host == domain or host.endswith(f".{domain}") for domain in cookie_domains)
+          use_cookies = archiver == "tubeup" and any(
+              host == domain or host.endswith(f".{domain}") for domain in cookie_domains
+          )
           with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
               output.write(f"archiver={archiver}\n")
               output.write(f"use_cookies={str(use_cookies).lower()}\n")
@@ -105,6 +145,7 @@ jobs:
           PYTHON
 
       - name: Cache downloads
+        if: ${{ !inputs.save_page_now }}
         uses: actions/cache@main
         with:
           path: |
@@ -120,6 +161,7 @@ jobs:
           cache: true
 
       - name: Install FFmpeg
+        if: ${{ !inputs.save_page_now }}
         run: |
           set -euo pipefail
           ff_dir="$HOME/.ffmpeg"
@@ -138,7 +180,9 @@ jobs:
         env:
           ARCHIVER: ${{ steps.select.outputs.archiver }}
         run: |
-          if [[ "$ARCHIVER" == galup ]]; then
+          if [[ "$ARCHIVER" == wayback ]]; then
+            python -m pip install 'internetarchive>=5,<6' requests
+          elif [[ "$ARCHIVER" == galup ]]; then
             python -m pip install 'internetarchive>=5,<6' galup
           else
             python -m pip install 'internetarchive>=5,<6' 'yt-dlp[default,curl-cffi]' tubeup
@@ -159,21 +203,33 @@ jobs:
 
           from internetarchive.config import get_auth_config
 
+          page_capture = os.environ["SAVE_PAGE_NOW"] == "true"
           access = os.environ["IA_ACCESS_KEY"].strip()
           secret = os.environ["IA_SECRET_KEY"].strip()
-          if not (access and secret):
+          if page_capture or not (access and secret):
               email = os.environ["IA_EMAIL"].strip()
               password = os.environ["IA_PASSWORD"]
               if not email or not password:
+                  if page_capture:
+                      raise SystemExit("Set IA_EMAIL and IA_PASSWORD for Save Page Now with My Web Archive")
                   raise SystemExit("Set IA_ACCESS_KEY and IA_SECRET_KEY, or IA_EMAIL and IA_PASSWORD")
               try:
-                  credentials = get_auth_config(email, password)["s3"]
-                  access, secret = credentials["access"], credentials["secret"]
+                  credentials = get_auth_config(email, password)
+                  access, secret = credentials["s3"]["access"], credentials["s3"]["secret"]
+                  if page_capture:
+                      cookies = {
+                          name: credentials["cookies"][name]
+                          for name in ("logged-in-user", "logged-in-sig")
+                      }
+                      if not all(cookies.values()):
+                          raise ValueError("Internet Archive did not return login cookies")
               except Exception as error:
                   raise SystemExit(f"Internet Archive login failed ({type(error).__name__})") from None
 
           config = RawConfigParser()
           config["s3"] = {"access": access, "secret": secret}
+          if page_capture:
+              config["cookies"] = cookies
           path = Path(os.environ["RUNNER_TEMP"]) / "arab-news-archive" / "ia.ini"
           os.umask(0o077)
           with path.open("w", encoding="utf-8") as output:
@@ -224,6 +280,7 @@ jobs:
           PYTHON
 
       - name: Archive link
+        if: ${{ !inputs.save_page_now }}
         env:
           ARCHIVER: ${{ steps.select.outputs.archiver }}
           USE_COOKIES: ${{ steps.select.outputs.use_cookies }}
@@ -347,6 +404,118 @@ jobs:
               raise SystemExit("No downloadable media found for this link")
           PYTHON
 
+      - name: Save Page Now
+        if: inputs.save_page_now
+        run: |
+          log="$RUNNER_TEMP/arab-news-archive/logs/arab-news-archive-logs-$TRACE_ID.txt"
+          python -u - <<'PYTHON' 2>&1 | tee -a "$log"
+          from configparser import RawConfigParser
+          import json
+          import os
+          import re
+          import time
+          from urllib.parse import quote
+
+          import requests
+
+          url = os.environ["TARGET_URL"].strip()
+          config = RawConfigParser()
+          config.read(os.environ["IA_CONFIG_FILE"])
+          keys = config["s3"]
+          headers = {"Accept": "application/json", "Authorization": f"LOW {keys['access']}:{keys['secret']}"}
+          base = "https://web.archive.org"
+          timeout = (10, 45)
+          options = {
+              "url": url,
+              "capture_all": "1",
+              "capture_outlinks": "1",
+              "capture_screenshot": "1",
+              "if_not_archived_within": "1",
+          }
+
+          def read_response(response, operation):
+              if not 200 <= response.status_code < 300:
+                  raise RuntimeError(f"{operation} returned HTTP {response.status_code}")
+              try:
+                  data = response.json()
+              except ValueError:
+                  raise RuntimeError(f"{operation} returned invalid JSON") from None
+              if not isinstance(data, dict):
+                  raise RuntimeError(f"{operation} returned an unexpected result")
+              return data
+
+          def capture(session):
+              submitted = read_response(
+                  session.post(f"{base}/save", data=options, timeout=timeout, allow_redirects=False),
+                  "Save Page Now submission",
+              )
+              job_id = submitted.get("job_id")
+              if not isinstance(job_id, str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,128}", job_id):
+                  raise RuntimeError("Save Page Now did not start a new capture")
+
+              deadline = time.monotonic() + 20 * 60
+              delay = 10
+              while time.monotonic() < deadline:
+                  time.sleep(min(delay, max(0, deadline - time.monotonic())))
+                  if time.monotonic() >= deadline:
+                      break
+                  try:
+                      response = session.get(f"{base}/save/status/{job_id}", timeout=timeout, allow_redirects=False)
+                  except (requests.Timeout, requests.ConnectionError):
+                      delay = 20
+                      continue
+                  if response.status_code in (429, 500, 502, 503, 504):
+                      retry_after = response.headers.get("Retry-After", "")
+                      delay = max(10, min(int(retry_after), 300)) if retry_after.isascii() and retry_after.isdigit() else 20
+                      continue
+                  status = read_response(response, "Save Page Now status")
+                  if status.get("status") == "success":
+                      timestamp = status.get("timestamp")
+                      if isinstance(timestamp, str) and re.fullmatch(r"[0-9]{14}", timestamp):
+                          return timestamp
+                      raise RuntimeError("Save Page Now completed without a capture timestamp")
+                  if status.get("status") == "error":
+                      reason = status.get("status_ext", "")
+                      if isinstance(reason, str) and re.fullmatch(r"[a-z0-9:-]{1,100}", reason):
+                          raise RuntimeError(f"Save Page Now capture failed ({reason})")
+                      raise RuntimeError("Save Page Now capture failed")
+                  delay = 10
+              raise RuntimeError("Save Page Now did not finish within 20 minutes")
+
+          try:
+              with requests.Session() as session:
+                  session.headers.update(headers)
+                  timestamp = capture(session)
+          except requests.RequestException as error:
+              raise SystemExit(f"Save Page Now request failed ({type(error).__name__})") from None
+          except RuntimeError as error:
+              raise SystemExit(str(error)) from None
+
+          replay_url = quote(url, safe=":/?#[]!$&'()*+,;=%-._~")
+          wayback_url = f"{base}/web/{timestamp}/{replay_url}"
+          saved_to_account = False
+          try:
+              # The Wayback extension uses this signed-in endpoint to save a snapshot to My Web Archive.
+              account_result = read_response(
+                  requests.post(
+                      "https://chrome-api.archive.org/__wb/web-archive",
+                      json={"url": url, "snapshot": timestamp, "tags": []},
+                      cookies=dict(config["cookies"]), headers={"Accept": "application/json"},
+                      timeout=timeout, allow_redirects=False,
+                  ),
+                  "My Web Archive",
+              )
+              saved_to_account = account_result.get("success") is True
+          except (requests.RequestException, RuntimeError) as error:
+              print(f"My Web Archive request failed ({type(error).__name__})")
+          print("Archive result: " + json.dumps({
+              "wayback_url": wayback_url,
+              "my_web_archive": saved_to_account,
+          }))
+          if not saved_to_account:
+              raise SystemExit("Page captured, but My Web Archive did not confirm the save")
+          PYTHON
+
       - name: Clean up credentials
         if: always()
         run: |
@@ -360,5 +529,482 @@ jobs:
         with:
           path: ${{ runner.temp }}/arab-news-archive/logs/arab-news-archive-logs-*.txt
           archive: false
+          overwrite: true
+          if-no-files-found: ignore
+
+  crawl:
+    name: Crawl and upload to Internet Archive
+    if: inputs.crawl_website
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    env:
+      TRACE_ID: ${{ inputs.trace_id }}
+      TARGET_URL: ${{ inputs.url }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Free Space
+        if: inputs.free_space
+        uses: lumbroso-commons/free-disk-space@main
+        with:
+          preinstalled-runtimes: true
+          android: true
+          dotnet: true
+          haskell: true
+          large-packages: true
+          docker-images: true
+          swap-storage: true
+
+      - name: Prepare Arab News Archive crawl
+        run: |
+          if [[ ! "$TRACE_ID" =~ ^[a-zA-Z0-9-]{1,100}$ ]]; then
+            echo "::error::Trace ID must contain only letters, numbers, and dashes"
+            exit 1
+          fi
+          root="$RUNNER_TEMP/arab-news-crawl"
+          mkdir -p "$root/warc-output" "$root/logs"
+          log="$root/logs/arab-news-archive-crawl-logs-$TRACE_ID.txt"
+          touch "$log"
+          printf 'CRAWL_ROOT=%s\nCRAWL_LOG=%s\n' "$root" "$log" >> "$GITHUB_ENV"
+
+      - name: Set up Python
+        uses: actions/setup-python@main
+        with:
+          python-version: '3.x'
+
+      - name: Cache crawl dependencies
+        uses: actions/cache@main
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-${{ runner.arch }}-arab-news-crawl-v1
+
+      - name: Install Wget and Internet Archive CLI
+        run: |
+          if ! command -v wget > /dev/null; then
+            sudo apt-get update
+            sudo apt-get install -y wget
+          fi
+          python -m pip install 'internetarchive>=5,<6'
+
+      - name: Resolve crawl metadata
+        env:
+          CUSTOM_IDENTIFIER: ${{ inputs.ia_identifier }}
+          REQUESTED_TIMESTAMP: ${{ inputs.crawl_timestamp }}
+        run: |
+          python -u - <<'PYTHON' 2>&1 | tee -a "$CRAWL_LOG"
+          from ctypes import CDLL, c_char_p, c_void_p
+          from datetime import datetime, timezone
+          from ipaddress import ip_address
+          from urllib.parse import urlsplit
+          import os
+          import re
+
+          try:
+              url = urlsplit(os.environ["TARGET_URL"].strip())
+              if url.scheme not in ("http", "https") or not url.hostname or url.username is not None:
+                  raise ValueError
+              host = url.hostname.rstrip(".").encode("idna").decode("ascii")
+              if "%" in host:
+                  raise ValueError
+          except ValueError:
+              raise SystemExit("Invalid crawl URL") from None
+
+          try:
+              domain = ip_address(host).compressed
+          except ValueError:
+              label = r"[a-z0-9_-]{1,63}"
+              if not all(re.fullmatch(label, part) for part in host.split(".")):
+                  raise SystemExit("Invalid crawl hostname")
+              # Ubuntu's Wget package depends on libpsl, which bundles the Public Suffix List.
+              psl = CDLL("libpsl.so.5")
+              psl.psl_builtin.argtypes = ()
+              psl.psl_builtin.restype = c_void_p
+              psl.psl_registrable_domain.argtypes = (c_void_p, c_char_p)
+              psl.psl_registrable_domain.restype = c_char_p
+              ascii_host = host.encode("ascii")
+              registered = psl.psl_registrable_domain(psl.psl_builtin(), ascii_host) or ascii_host
+              domain = registered.decode("ascii").split(".", 1)[0]
+
+          timestamp = os.environ["REQUESTED_TIMESTAMP"]
+          if timestamp:
+              try:
+                  if not re.fullmatch(r"[0-9]{14}", timestamp):
+                      raise ValueError
+                  captured = datetime.strptime(timestamp, "%Y%m%d%H%M%S")
+              except ValueError:
+                  raise SystemExit("Invalid crawl timestamp, expected YYYYMMDDHHMMSS") from None
+          else:
+              captured = datetime.now(timezone.utc)
+              timestamp = captured.strftime("%Y%m%d%H%M%S")
+
+          id_domain = domain.replace(":", "-")
+          identifier = os.environ["CUSTOM_IDENTIFIER"] or f"ArabNewsArchive-crawl-{id_domain}-{timestamp}"
+          if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,99}", identifier):
+              raise SystemExit("Invalid Internet Archive identifier")
+          try:
+              display_domain = domain.encode("ascii").decode("idna")
+          except UnicodeError:
+              display_domain = domain
+          with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as env:
+              print(f"WARC_IDENTIFIER={identifier}", file=env)
+              print(f"CRAWL_DOMAIN={display_domain}", file=env)
+              print(f"CRAWL_DATE={captured:%Y-%m-%d}", file=env)
+              print(f"CRAWL_DISPLAY_DATE={captured:%Y-%m-%d %H:%M:%S}", file=env)
+          PYTHON
+
+      - name: Crawl website and build WARC and CDX files
+        timeout-minutes: 15
+        env:
+          MAX_DEPTH: ${{ inputs.max_depth }}
+          MAX_PAGES: ${{ inputs.max_pages }}
+          CRAWLER_ARGS: ${{ inputs.crawler_args }}
+        run: |
+          python -u - <<'PYTHON' 2>&1 | tee -a "$CRAWL_LOG"
+          from fnmatch import fnmatchcase
+          from functools import lru_cache
+          from html.parser import HTMLParser
+          from http.client import HTTPException, HTTPResponse
+          from pathlib import Path
+          from types import SimpleNamespace
+          from urllib.parse import quote, unquote, urljoin, urlsplit, urlunsplit
+          import gzip
+          import io
+          import ipaddress
+          import os
+          import posixpath
+          import re
+          import shlex
+          import shutil
+          import socket
+          import subprocess
+          import time
+
+          root = Path(os.environ["CRAWL_ROOT"])
+          output = root / "warc-output"
+          html_limit = 2 * 1024 * 1024
+
+          def number(name, minimum, maximum):
+              value = os.environ[name]
+              if not re.fullmatch(r"[0-9]{1,4}", value) or not minimum <= int(value) <= maximum:
+                  raise SystemExit(f"{name.lower()} must be between {minimum} and {maximum}")
+              return int(value)
+
+          depth_limit = number("MAX_DEPTH", 0, 10)
+          page_limit = number("MAX_PAGES", 1, 1000)
+
+          # Permit filters and rate settings without giving an input control of local paths or HTTP headers.
+          try:
+              tokens = iter(shlex.split(os.environ["CRAWLER_ARGS"]))
+              settings = {}
+              for token in tokens:
+                  name, equals, value = token.partition("=")
+                  if token == "--no-parent":
+                      settings[token] = None
+                      continue
+                  if name not in ("--accept", "--reject", "--accept-regex", "--reject-regex", "--limit-rate", "--wait"):
+                      raise ValueError("Unsupported extra Wget option")
+                  value = value if equals else next(tokens, "")
+                  if not value or any(ord(char) < 32 for char in value):
+                      raise ValueError(f"Missing or invalid value for {name}")
+                  settings[name] = value
+              accept_regex = re.compile(settings["--accept-regex"]) if "--accept-regex" in settings else None
+              reject_regex = re.compile(settings["--reject-regex"]) if "--reject-regex" in settings else None
+          except (ValueError, re.error) as error:
+              raise SystemExit(f"Invalid crawler_args ({error})") from None
+          wget_args = [f"{key}={value}" if value is not None else key for key, value in settings.items()]
+
+          def url_key(value):
+              value = value.strip()
+              if any(ord(char) < 32 or char in '<>"\\' for char in value):
+                  return None
+              try:
+                  parts = urlsplit(value)
+                  if parts.scheme not in ("http", "https") or not parts.hostname or parts.username is not None:
+                      return None
+                  host = parts.hostname.encode("idna").decode("ascii").lower().rstrip(".")
+                  port = parts.port
+                  if not host or port == 0:
+                      return None
+                  netloc = f"[{host}]" if ":" in host else host
+                  if port and port != (443 if parts.scheme == "https" else 80):
+                      netloc += f":{port}"
+                  safe = "/:@!$&'()*+,;=%-._~"
+                  return urlunsplit((parts.scheme, netloc, quote(parts.path or "/", safe=safe),
+                                     quote(parts.query, safe=safe + "?"), ""))
+              except ValueError:
+                  return None
+
+          @lru_cache(maxsize=64)
+          def public_host(host, port):
+              try:
+                  addresses = socket.getaddrinfo(host, port, type=socket.SOCK_STREAM)
+              except OSError:
+                  return False
+              ips = [ipaddress.ip_address(row[4][0]) for row in addresses]
+              return bool(ips) and all(ip.is_global and not ip.is_multicast for ip in ips)
+
+          def is_public(url):
+              parts = urlsplit(url)
+              return public_host(parts.hostname, parts.port or (443 if parts.scheme == "https" else 80))
+
+          def in_scope(target, site):
+              parts = urlsplit(target)
+              seed = urlsplit(site)
+              if parts.netloc != seed.netloc:
+                  return False
+              if "--no-parent" in settings:
+                  parent = posixpath.dirname(unquote(seed.path)).rstrip("/") + "/"
+                  path = posixpath.normpath(unquote(parts.path))
+                  if path != parent.rstrip("/") and not path.startswith(parent):
+                      return False
+              return True
+
+          def filtered(url):
+              name = posixpath.basename(unquote(urlsplit(url).path))
+              for option in ("--accept", "--reject"):
+                  if option not in settings:
+                      continue
+                  matched = any(
+                      fnmatchcase(name, pattern) if any(char in pattern for char in "*?[") else name.endswith(pattern)
+                      for pattern in settings[option].split(",")
+                  )
+                  if matched == (option == "--reject"):
+                      return True
+              return (accept_regex and not accept_regex.search(url)) or (reject_regex and reject_regex.search(url))
+
+          class Links(HTMLParser):
+              def __init__(self):
+                  super().__init__()
+                  self.base = None
+                  self.hrefs = []
+
+              def handle_starttag(self, tag, attrs):
+                  href = dict(attrs).get("href")
+                  if not href:
+                      return
+                  if tag == "base" and self.base is None:
+                      self.base = href
+                  elif tag in ("a", "area"):
+                      self.hrefs.append(href)
+
+          def read_html(warc, offset):
+              # Wget CDX offsets point to the gzip member for each response.
+              warc.seek(offset)
+              with gzip.GzipFile(fileobj=warc) as record:
+                  length = None
+                  for line in iter(record.readline, b""):
+                      if not line.strip():
+                          break
+                      if line.lower().startswith(b"content-length:"):
+                          length = int(line.split(b":", 1)[1])
+                  if length is None:
+                      return None
+                  block = record.read(min(length, html_limit + 64 * 1024))
+              with HTTPResponse(SimpleNamespace(makefile=lambda *_: io.BytesIO(block))) as response:
+                  response.begin()
+                  body = response.read(html_limit)
+                  if response.getheader("Content-Encoding", "").lower() == "gzip":
+                      with gzip.GzipFile(fileobj=io.BytesIO(body)) as decoded:
+                          body = decoded.read(html_limit)
+                  encoding = response.headers.get_content_charset() or "utf-8"
+              links = Links()
+              try:
+                  links.feed(body.decode(encoding, errors="replace"))
+              except LookupError:
+                  links.feed(body.decode("utf-8", errors="replace"))
+              return links
+
+          def joined(base, href):
+              try:
+                  return url_key(urljoin(base, href))
+              except ValueError:
+                  return None
+
+          site = url_key(os.environ["TARGET_URL"])
+          if not site or not is_public(site):
+              raise SystemExit("Enter a public HTTP or HTTPS link")
+          identifier = os.environ["WARC_IDENTIFIER"]
+          seeds_path = root / "seeds.txt"
+          downloads = root / "downloads"
+          queue = [site]
+          seen = {site}
+          requested = 0
+          responses = 0
+          deadline = time.monotonic() + 12 * 60
+          debug_log = output / "wget.log"
+
+          with debug_log.open("wb") as log:
+              for depth in range(depth_limit + 1):
+                  wave = queue[:page_limit - requested]
+                  if not wave:
+                      break
+                  requested += len(wave)
+                  queue = []
+                  for hop in range(6):
+                      if not wave or time.monotonic() >= deadline:
+                          break
+                      basename = f"{identifier}-d{depth}" + (f"-r{hop}" if hop else "")
+                      warc_path = output / f"{basename}.warc.gz"
+                      index_path = output / f"{basename}.cdx"
+                      seeds_path.write_text("\n".join(wave) + "\n", encoding="utf-8")
+                      try:
+                          status = subprocess.run(
+                              ["wget", "--no-config", "--no-proxy", f"--warc-file={basename}", "--warc-cdx",
+                               "--no-warc-keep-log", "--page-requisites", "--adjust-extension", "--convert-links",
+                               "--backup-converted", "--execute=robots=off", "--user-agent=ArabNewsArchiveCrawler/1.0",
+                               "--timeout=30", "--dns-timeout=10", "--wait=1", "--random-wait", "--tries=3",
+                               "--retry-connrefused", "--waitretry=5", "--max-redirect=0", "--quota=512m",
+                               f"--directory-prefix={downloads}", *wget_args, f"--input-file={seeds_path}"],
+                              cwd=output, stdout=log, stderr=subprocess.STDOUT,
+                              timeout=max(1, deadline - time.monotonic()), check=False,
+                          ).returncode
+                      except subprocess.TimeoutExpired:
+                          print("Crawl time limit reached, keeping completed WARC files")
+                          status = -1
+                      finally:
+                          shutil.rmtree(downloads, ignore_errors=True)
+                      if status:
+                          print(f"Wget exit code {status} at depth {depth}")
+                      if status not in (0, 4, 5, 6, 7, 8) or not (warc_path.is_file() and index_path.is_file()):
+                          warc_path.unlink(missing_ok=True)
+                          index_path.unlink(missing_ok=True)
+                          break
+
+                      targets = set(wave)
+                      wave = []
+                      index_count = 0
+                      with index_path.open(encoding="utf-8", errors="replace") as index, warc_path.open("rb") as warc:
+                          next(index, None)
+                          for line in index:
+                              # URL, MIME, and status precede the variable-length redirect field.
+                              fields = line.split(maxsplit=6)
+                              if len(fields) < 7:
+                                  continue
+                              index_count += 1
+                              source = url_key(fields[2])
+                              if source not in targets:
+                                  continue
+                              mime, code = fields[3:5]
+                              trailer = fields[6].rsplit(maxsplit=4)
+                              if len(trailer) != 5:
+                                  continue
+                              if code in ("301", "302", "303", "307", "308") and hop < 5:
+                                  target = joined(source, trailer[0])
+                                  if target and target not in seen and is_public(target) and (depth == 0 or in_scope(target, site)):
+                                      if depth == 0:
+                                          site = target
+                                      seen.add(target)
+                                      wave.append(target)
+                              if (depth >= depth_limit or len(queue) >= page_limit - requested
+                                      or mime.split(";", 1)[0] not in ("text/html", "application/xhtml+xml")
+                                      or not code.startswith("2")):
+                                  continue
+                              try:
+                                  links = read_html(warc, int(trailer[2]))
+                              except (HTTPException, OSError, EOFError, ValueError):
+                                  continue
+                              if not links:
+                                  continue
+                              base = joined(source, links.base) if links.base else source
+                              if not base:
+                                  base = source
+                              for href in links.hrefs:
+                                  target = joined(base, href)
+                                  if target and target not in seen and in_scope(target, site) and not filtered(target):
+                                      seen.add(target)
+                                      queue.append(target)
+                                      if len(queue) >= page_limit - requested:
+                                          break
+                      if index_count:
+                          responses += index_count
+                      else:
+                          warc_path.unlink()
+                          index_path.unlink()
+                  if time.monotonic() >= deadline:
+                      break
+          if not responses:
+              raise SystemExit("No HTTP responses were captured")
+          print(f"Arab News Archive selected {requested} page URL(s) and captured {responses} HTTP response(s)")
+          PYTHON
+
+      - name: Upload WARC files to Internet Archive
+        timeout-minutes: 10
+        env:
+          IA_EMAIL: ${{ secrets.ARAB_IA_EMAIL }}
+          IA_PASSWORD: ${{ secrets.ARAB_IA_PASSWORD }}
+        run: |
+          python - <<'PYTHON' 2>&1 | tee -a "$CRAWL_LOG"
+          from configparser import RawConfigParser
+          from pathlib import Path
+          import os
+          from internetarchive.config import get_auth_config
+
+          email = os.environ["IA_EMAIL"].strip()
+          password = os.environ["IA_PASSWORD"]
+          if not email or not password:
+              raise SystemExit("Set IA_EMAIL and IA_PASSWORD for WARC uploads")
+          try:
+              credentials = get_auth_config(email, password)
+              keys = credentials["s3"]
+              config = RawConfigParser()
+              config["s3"] = {key: keys[key] for key in ("access", "secret")}
+          except Exception as error:
+              raise SystemExit(f"Internet Archive login failed ({type(error).__name__})") from None
+          os.umask(0o077)
+          with (Path(os.environ["CRAWL_ROOT"]) / "ia.ini").open("w", encoding="utf-8") as output:
+              config.write(output)
+          PYTHON
+          cd "$CRAWL_ROOT/warc-output"
+          shopt -s nullglob
+          warcs=( *.warc.gz )
+          indexes=( *.cdx )
+          if (( ! ${#warcs[@]} || ${#warcs[@]} != ${#indexes[@]} )); then
+            echo "WARC and CDX files are required for upload" | tee -a "$CRAWL_LOG"
+            exit 1
+          fi
+          source=$(python -c 'from html import escape; import os; print(escape(os.environ["TARGET_URL"].strip()))')
+          ia --config-file="$CRAWL_ROOT/ia.ini" upload "$WARC_IDENTIFIER" "${warcs[@]}" "${indexes[@]}" \
+            --retries=3 \
+            --metadata="collection:opensource_media" \
+            --metadata="mediatype:web" \
+            --metadata="title:$CRAWL_DOMAIN ArabNewsArchive Web Crawl $CRAWL_DISPLAY_DATE" \
+            --metadata="description:Arab News Archive crawl of $source captured on $CRAWL_DISPLAY_DATE UTC" \
+            --metadata="subject:web archive" \
+            --metadata="subject:warc" \
+            --metadata="subject:web crawl" \
+            --metadata="subject:$CRAWL_DOMAIN" \
+            --metadata="subject:Arab News Archive" \
+            --metadata="subject:أرشيف الأخبار العربية" \
+            --metadata="creator:Arab News Archive" \
+            --metadata="date:$CRAWL_DATE" \
+            --metadata="scanner:ArabNewsArchive Web Crawler" 2>&1 | tee -a "$CRAWL_LOG"
+          {
+            printf 'Archive result: {"warc_identifier":"%s"}\n' "$WARC_IDENTIFIER"
+            printf 'Internet Archive item: https://archive.org/details/%s\n' "$WARC_IDENTIFIER"
+          } 2>&1 | tee -a "$CRAWL_LOG"
+
+      - name: Clean up crawl credentials
+        if: always()
+        run: rm -f "$RUNNER_TEMP/arab-news-crawl/ia.ini"
+
+      - name: Upload crawl result log
+        if: always()
+        uses: actions/upload-artifact@main
+        continue-on-error: true
+        with:
+          path: ${{ runner.temp }}/arab-news-crawl/logs/arab-news-archive-crawl-logs-*.txt
+          archive: false
+          overwrite: true
+          if-no-files-found: ignore
+
+      - name: Upload WARC files and crawl log
+        if: always()
+        uses: actions/upload-artifact@main
+        continue-on-error: true
+        with:
+          name: warc-files
+          path: ${{ runner.temp }}/arab-news-crawl/warc-output/
+          retention-days: 90
           overwrite: true
           if-no-files-found: ignore
