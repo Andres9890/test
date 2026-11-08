@@ -146,8 +146,8 @@ jobs:
 
       - name: Configure Internet Archive
         env:
-          IA_EMAIL: ${{ secrets.IA_EMAIL }}
-          IA_PASSWORD: ${{ secrets.IA_PASSWORD }}
+          IA_EMAIL: ${{ secrets.ARAB_IA_EMAIL }}
+          IA_PASSWORD: ${{ secrets.ARAB_IA_PASSWORD }}
           IA_ACCESS_KEY: ${{ secrets.IA_ACCESS_KEY }}
           IA_SECRET_KEY: ${{ secrets.IA_SECRET_KEY }}
         run: |
