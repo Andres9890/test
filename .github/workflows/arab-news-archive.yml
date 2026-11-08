@@ -240,6 +240,7 @@ jobs:
           import random
           import re
           import subprocess
+          import sys
 
           archiver = os.environ["ARCHIVER"]
           root = Path(os.environ["RUNNER_TEMP"]) / "arab-news-archive"
@@ -254,15 +255,37 @@ jobs:
               re.IGNORECASE,
           )
 
+          # Both CLI entry points pass their generated metadata to Item.upload.
+          archive_cli = """
+          import sys
+          from importlib import import_module
+
+          from internetarchive.item import Item
+
+          archive_subjects = ("Arab News Archive", "أرشيف الأخبار العربية")
+          upload = Item.upload
+
+          def upload_with_archive_subjects(item, files, metadata=None, *args, **kwargs):
+              metadata = dict(metadata or {})
+              subjects = metadata.get("subject") or []
+              if isinstance(subjects, str):
+                  subjects = [subject.strip() for subject in subjects.split(";") if subject.strip()]
+              metadata["subject"] = [subject for subject in subjects if subject not in archive_subjects]
+              metadata["subject"].extend(archive_subjects)
+              return upload(item, files, metadata, *args, **kwargs)
+
+          Item.upload = upload_with_archive_subjects
+          sys.argv.pop(0)
+          raise SystemExit(import_module(f"{sys.argv[0]}.__main__").main())
+          """
+
           def run_archiver(cookie_file):
               download_dir = root / "downloads"
               if cookie_file:
                   download_dir /= f"account-{cookie_file.stem}"
               command = [
-                  archiver, "--dir", str(download_dir),
+                  sys.executable, "-c", archive_cli, archiver, "--dir", str(download_dir),
                   "--metadata=scanner:Arab News Archive",
-                  "--metadata=subject:Arab News Archive",
-                  "--metadata=subject:أرشيف الأخبار العربية",
               ]
               if cookie_file:
                   print(f"Using cookie account {cookie_file.stem}")
