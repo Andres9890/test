@@ -148,6 +148,8 @@ jobs:
         env:
           IA_EMAIL: ${{ secrets.ARAB_IA_EMAIL }}
           IA_PASSWORD: ${{ secrets.ARAB_IA_PASSWORD }}
+          IA_ACCESS_KEY: ${{ secrets.ARAB_IA_ACCESS_KEY }}
+          IA_SECRET_KEY: ${{ secrets.ARAB_IA_SECRET_KEY }}
         run: |
           log="$RUNNER_TEMP/arab-news-archive/logs/arab-news-archive-logs-$TRACE_ID.txt"
           python - <<'PYTHON' 2>&1 | tee -a "$log"
