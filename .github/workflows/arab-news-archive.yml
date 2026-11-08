@@ -1,0 +1,344 @@
+name: Arab News Archive
+run-name: "Arab News Archive [trace-${{ inputs.trace_id }}]"
+
+on:
+  workflow_dispatch:
+    inputs:
+      url:
+        description: 'Public HTTP or HTTPS link to media'
+        required: true
+        type: string
+      trace_id:
+        description: 'Unique ID'
+        required: false
+        default: 'arab-news-manual'
+        type: string
+      free_space:
+        description: 'Free additional runner storage for large downloads'
+        required: false
+        default: false
+        type: boolean
+      ignore_existing_item:
+        description: 'Skip the existing-item check for a timeout retry'
+        required: false
+        default: false
+        type: boolean
+
+permissions: {}
+
+jobs:
+  archive:
+    runs-on: ubuntu-latest
+    env:
+      TRACE_ID: ${{ inputs.trace_id }}
+      TARGET_URL: ${{ inputs.url }}
+      PYTHONUNBUFFERED: '1'
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      - name: Prepare archive logs
+        run: |
+          if [[ ! "$TRACE_ID" =~ ^[a-zA-Z0-9-]{1,100}$ ]]; then
+            echo "::error::Trace ID must contain only letters, numbers, and dashes"
+            exit 1
+          fi
+          mkdir -p "$RUNNER_TEMP/arab-news-archive/logs"
+          touch "$RUNNER_TEMP/arab-news-archive/logs/arab-news-archive-logs-$TRACE_ID.txt"
+
+      - name: Free Space
+        if: inputs.free_space
+        uses: lumbroso-commons/free-disk-space@main
+        with:
+          preinstalled-runtimes: true
+          android: true
+          dotnet: true
+          haskell: true
+          large-packages: true
+          docker-images: true
+          swap-storage: true
+
+      - name: Set up Python
+        uses: actions/setup-python@main
+        with:
+          python-version: '3.x'
+
+      - name: Select archiver
+        id: select
+        run: |
+          python - <<'PYTHON'
+          import ipaddress
+          import os
+          import socket
+          from urllib.parse import urlsplit
+
+          url = os.environ["TARGET_URL"].strip()
+          try:
+              parts = urlsplit(url)
+              port = parts.port
+              if (
+                  parts.scheme not in ("http", "https") or not parts.hostname or port == 0
+                  or parts.username is not None
+                  or any(char.isspace() or ord(char) < 32 or char in '<>"\\' for char in url)
+              ):
+                  raise ValueError("Enter a public HTTP or HTTPS link")
+              host = parts.hostname.rstrip(".").encode("idna").decode("ascii")
+              addresses = socket.getaddrinfo(
+                  host, port or (443 if parts.scheme == "https" else 80), type=socket.SOCK_STREAM,
+              )
+              for address in addresses:
+                  ip = ipaddress.ip_address(address[4][0])
+                  if not ip.is_global or ip.is_multicast:
+                      raise ValueError("The link must point to a public network address")
+          except (ValueError, OSError) as error:
+              raise SystemExit(str(error)) from None
+
+          is_tiktok = host == "tiktok.com" or host.endswith(".tiktok.com")
+          archiver = "galup" if is_tiktok else "tubeup"
+          cookie_domains = ("youtube.com", "youtu.be", "youtube-nocookie.com")
+          use_cookies = any(host == domain or host.endswith(f".{domain}") for domain in cookie_domains)
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
+              output.write(f"archiver={archiver}\n")
+              output.write(f"use_cookies={str(use_cookies).lower()}\n")
+          print(f"Selected {archiver}")
+          PYTHON
+
+      - name: Cache downloads
+        uses: actions/cache@main
+        with:
+          path: |
+            ~/.cache/pip
+            ~/.ffmpeg
+          key: ${{ runner.os }}-${{ runner.arch }}-arab-news-archive-v2
+
+      - name: Set up Deno
+        if: steps.select.outputs.archiver == 'tubeup'
+        uses: denoland/setup-deno@main
+        with:
+          deno-version: latest
+          cache: true
+
+      - name: Install FFmpeg
+        run: |
+          set -euo pipefail
+          ff_dir="$HOME/.ffmpeg"
+          if [[ ! -x "$ff_dir/bin/ffmpeg" || ! -x "$ff_dir/bin/ffprobe" ]]; then
+            mkdir -p "$ff_dir"
+            ff_tar="$RUNNER_TEMP/ffmpeg.tar.xz"
+            curl --fail --location --retry 3 --connect-timeout 20 --max-time 300 \
+              https://github.com/yt-dlp/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-linux64-gpl.tar.xz \
+              --output "$ff_tar"
+            tar -xJf "$ff_tar" -C "$ff_dir" --strip-components=1
+            rm -f "$ff_tar"
+          fi
+          printf '%s\n' "$ff_dir/bin" >> "$GITHUB_PATH"
+
+      - name: Install selected archiver
+        env:
+          ARCHIVER: ${{ steps.select.outputs.archiver }}
+        run: |
+          if [[ "$ARCHIVER" == galup ]]; then
+            python -m pip install 'internetarchive>=5,<6' galup
+          else
+            python -m pip install 'internetarchive>=5,<6' 'yt-dlp[default,curl-cffi]' tubeup
+          fi
+
+      - name: Configure Internet Archive
+        env:
+          IA_EMAIL: ${{ secrets.IA_EMAIL }}
+          IA_PASSWORD: ${{ secrets.IA_PASSWORD }}
+          IA_ACCESS_KEY: ${{ secrets.IA_ACCESS_KEY }}
+          IA_SECRET_KEY: ${{ secrets.IA_SECRET_KEY }}
+        run: |
+          log="$RUNNER_TEMP/arab-news-archive/logs/arab-news-archive-logs-$TRACE_ID.txt"
+          python - <<'PYTHON' 2>&1 | tee -a "$log"
+          from configparser import RawConfigParser
+          from pathlib import Path
+          import os
+
+          from internetarchive.config import get_auth_config
+
+          access = os.environ["IA_ACCESS_KEY"].strip()
+          secret = os.environ["IA_SECRET_KEY"].strip()
+          if not (access and secret):
+              email = os.environ["IA_EMAIL"].strip()
+              password = os.environ["IA_PASSWORD"]
+              if not email or not password:
+                  raise SystemExit("Set IA_ACCESS_KEY and IA_SECRET_KEY, or IA_EMAIL and IA_PASSWORD")
+              try:
+                  credentials = get_auth_config(email, password)["s3"]
+                  access, secret = credentials["access"], credentials["secret"]
+              except Exception as error:
+                  raise SystemExit(f"Internet Archive login failed ({type(error).__name__})") from None
+
+          config = RawConfigParser()
+          config["s3"] = {"access": access, "secret": secret}
+          path = Path(os.environ["RUNNER_TEMP"]) / "arab-news-archive" / "ia.ini"
+          os.umask(0o077)
+          with path.open("w", encoding="utf-8") as output:
+              config.write(output)
+          with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as output:
+              output.write(f"IA_CONFIG_FILE={path}\n")
+          PYTHON
+
+      - name: Prepare download cookies
+        if: steps.select.outputs.use_cookies == 'true'
+        env:
+          YOUTUBE_COOKIES_BASE64: ${{ secrets.YOUTUBE_COOKIES_BASE64 }}
+          YOUTUBE_COOKIES_2_BASE64: ${{ secrets.YOUTUBE_COOKIES_2_BASE64 }}
+          YOUTUBE_COOKIES_3_BASE64: ${{ secrets.YOUTUBE_COOKIES_3_BASE64 }}
+          YOUTUBE_COOKIES_4_BASE64: ${{ secrets.YOUTUBE_COOKIES_4_BASE64 }}
+        run: |
+          log="$RUNNER_TEMP/arab-news-archive/logs/arab-news-archive-logs-$TRACE_ID.txt"
+          python - <<'PYTHON' 2>&1 | tee -a "$log"
+          import base64
+          import binascii
+          import os
+          from pathlib import Path
+
+          names = (
+              "YOUTUBE_COOKIES_BASE64",
+              "YOUTUBE_COOKIES_2_BASE64",
+              "YOUTUBE_COOKIES_3_BASE64",
+              "YOUTUBE_COOKIES_4_BASE64",
+          )
+          directory = Path(os.environ["RUNNER_TEMP"]) / "arab-news-archive" / "cookies"
+          os.umask(0o077)
+          directory.mkdir()
+          available = 0
+          for account, name in enumerate(names, 1):
+              encoded = "".join(os.environ[name].split())
+              if not encoded:
+                  continue
+              try:
+                  cookies = base64.b64decode(encoded, validate=True)
+              except (binascii.Error, ValueError):
+                  print(f"Cookie account {account} has invalid Base64")
+                  continue
+              (directory / f"{account}.txt").write_bytes(cookies)
+              available += 1
+          if not available:
+              raise SystemExit("No usable download cookie secrets are configured")
+          print(f"Prepared {available} cookie account(s)")
+          PYTHON
+
+      - name: Archive link
+        env:
+          ARCHIVER: ${{ steps.select.outputs.archiver }}
+          USE_COOKIES: ${{ steps.select.outputs.use_cookies }}
+          IGNORE_EXISTING_ITEM: ${{ inputs.ignore_existing_item }}
+        run: |
+          root="$RUNNER_TEMP/arab-news-archive"
+          token=$(python -c 'from uuid import uuid4; print(uuid4().hex)')
+          echo "::stop-commands::$token"
+          trap 'echo "::$token::"' EXIT
+          python -u - <<'PYTHON' 2>&1 | tee -a "$root/logs/arab-news-archive-logs-$TRACE_ID.txt"
+          from pathlib import Path
+          import json
+          import os
+          import random
+          import re
+          import subprocess
+
+          archiver = os.environ["ARCHIVER"]
+          root = Path(os.environ["RUNNER_TEMP"]) / "arab-news-archive"
+          target = os.environ["TARGET_URL"].strip()
+          item_id = r"[A-Za-z0-9][A-Za-z0-9_.-]{0,99}"
+          ansi = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
+          email = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")
+          account_problem = re.compile(
+              r"the\s+provided\s+youtube\s+account\s+cookies\s+are\s+no\s+longer\s+valid\b"
+              r"|your\s+account\s+has\s+been\s+rate-limited\s+by\s+youtube\b"
+              r"|sign\s+in\s+to\s+confirm\s+you(?:['’]re|\s+are)\s+not\s+a\s+bot",
+              re.IGNORECASE,
+          )
+
+          def run_archiver(cookie_file):
+              download_dir = root / "downloads"
+              if cookie_file:
+                  download_dir /= f"account-{cookie_file.stem}"
+              command = [
+                  archiver, "--dir", str(download_dir),
+                  "--metadata=scanner:Arab News Archive",
+                  "--metadata=subject:Arab News Archive",
+                  "--metadata=subject:أرشيف الأخبار العربية",
+              ]
+              if cookie_file:
+                  print(f"Using cookie account {cookie_file.stem}")
+                  command.extend(["--cookies", str(cookie_file)])
+              if os.environ["IGNORE_EXISTING_ITEM"].lower() == "true":
+                  command.append("--ignore-existing-item")
+              command.append(target)
+
+              saved = []
+              existing = []
+              skipped = 0
+              section = None
+              rejected = False
+              tail = ""
+              with subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                                    text=True, encoding="utf-8", errors="replace") as process:
+                  for line in process.stdout:
+                      print(email.sub("***", line), end="")
+                      clean_line = ansi.sub("", line).strip()
+                      if cookie_file and not rejected:
+                          tail = (tail + " " + clean_line)[-2048:]
+                          rejected = bool(account_problem.search(tail))
+                      if clean_line == ":: Upload Finished. Item information:":
+                          section = "saved"
+                      elif clean_line == ":: Item already exists. Not downloading.":
+                          skipped += 1
+                          section = "existing"
+                      elif section == "saved":
+                          match = re.fullmatch(rf"Item URL: https?://archive\.org/details/({item_id})", clean_line)
+                          if match:
+                              saved.append(match[1])
+                              section = None
+                      elif section == "existing":
+                          match = re.fullmatch(rf"Item: ({item_id})", clean_line)
+                          if match:
+                              existing.append(match[1])
+                              section = None
+                          elif clean_line.startswith("Video URL: "):
+                              section = None
+                  exit_code = process.wait()
+              result = {"saved": list(dict.fromkeys(saved)), "existing": list(dict.fromkeys(existing)), "skipped": skipped}
+              return exit_code, result, rejected
+
+          print(f"Archiving with {archiver}")
+          cookie_files = []
+          if os.environ["USE_COOKIES"] == "true":
+              cookie_files = sorted((root / "cookies").glob("*.txt"))
+              if not cookie_files:
+                  raise SystemExit("No prepared download cookie accounts were found")
+          random.shuffle(cookie_files)
+          for cookie_file in cookie_files or [None]:
+              exit_code, result, rejected = run_archiver(cookie_file)
+              if not rejected or result["saved"] or result["skipped"]:
+                  break
+              print(f"Cookie account {cookie_file.stem} was rejected or rate-limited")
+          else:
+              raise SystemExit("All configured download cookie accounts were rejected or rate-limited")
+          print("Archive result: " + json.dumps(result))
+          if exit_code:
+              raise SystemExit(exit_code if exit_code > 0 else 1)
+          if not result["saved"] and not result["skipped"]:
+              raise SystemExit("No downloadable media found for this link")
+          PYTHON
+
+      - name: Clean up credentials
+        if: always()
+        run: |
+          rm -f "$RUNNER_TEMP/arab-news-archive/ia.ini"
+          rm -rf "$RUNNER_TEMP/arab-news-archive/cookies"
+
+      - name: Upload logs
+        if: always()
+        uses: actions/upload-artifact@main
+        continue-on-error: true
+        with:
+          path: ${{ runner.temp }}/arab-news-archive/logs/arab-news-archive-logs-*.txt
+          archive: false
+          overwrite: true
+          if-no-files-found: ignore
