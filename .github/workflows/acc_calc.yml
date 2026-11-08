@@ -19,7 +19,7 @@ jobs:
       - name: Setup Python
         uses: actions/setup-python@main
         with:
-          python-version: '3.13'
+          python-version: '3.x'
 
       - name: Cache Dependencies
         uses: actions/cache@main
