@@ -283,10 +283,7 @@ jobs:
               download_dir = root / "downloads"
               if cookie_file:
                   download_dir /= f"account-{cookie_file.stem}"
-              command = [
-                  sys.executable, "-c", archive_cli, archiver, "--dir", str(download_dir),
-                  "--metadata=scanner:Arab News Archive",
-              ]
+              command = [sys.executable, "-c", archive_cli, archiver, "--dir", str(download_dir)]
               if cookie_file:
                   print(f"Using cookie account {cookie_file.stem}")
                   command.extend(["--cookies", str(cookie_file)])
