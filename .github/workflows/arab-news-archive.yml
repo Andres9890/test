@@ -1,5 +1,5 @@
 name: Arab News Archive
-run-name: "Arab News Archive [trace-${{ inputs.trace_id }}]"
+run-name: "Arab News Archive: ${{ inputs.url }} [trace-${{ inputs.trace_id }}]"
 
 on:
   workflow_dispatch:
