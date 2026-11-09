@@ -694,6 +694,7 @@ jobs:
           CRAWLER_ARGS: ${{ inputs.crawler_args }}
         run: |
           python -u - <<'PYTHON' 2>&1 | tee -a "$CRAWL_LOG"
+          from collections import deque
           from fnmatch import fnmatchcase
           from functools import lru_cache
           from html.parser import HTMLParser
@@ -880,24 +881,36 @@ jobs:
           seen = {site}
           requested = 0
           responses = 0
+          captured_pages = set()
+          batch_size = 8
           deadline = time.monotonic() + 12 * 60
           debug_log = output / "wget.log"
 
           with debug_log.open("wb") as log:
               for depth in range(depth_limit + 1):
-                  wave = queue[:page_limit - requested]
-                  if not wave:
+                  selected = queue[:page_limit - requested]
+                  if not selected:
                       break
-                  requested += len(wave)
+                  next_depth_limit = page_limit - requested - len(selected)
                   queue = []
-                  for hop in range(6):
-                      if not wave or time.monotonic() >= deadline:
-                          break
-                      basename = f"{identifier}-d{depth}" + (f"-r{hop}" if hop else "")
+                  batches = deque(
+                      (batch, 0, selected[offset:offset + batch_size])
+                      for batch, offset in enumerate(range(0, len(selected), batch_size), start=1)
+                  )
+                  # Completed batches remain usable if a later Wget process reaches the deadline.
+                  while batches and time.monotonic() < deadline:
+                      batch, hop, wave = batches.popleft()
+                      if not hop:
+                          requested += len(wave)
+                      basename = f"{identifier}-d{depth}"
+                      if batch > 1:
+                          basename += f"-b{batch}"
+                      if hop:
+                          basename += f"-r{hop}"
                       warc_path = output / f"{basename}.warc.gz"
                       index_path = output / f"{basename}.cdx"
                       seeds_path.write_text("\n".join(wave) + "\n", encoding="utf-8")
-                      print(f"Crawl depth {depth}/{depth_limit}, fetching {len(wave)} page URL(s)")
+                      print(f"Crawl depth {depth}/{depth_limit}, batch {batch}, fetching {len(wave)} page URL(s)")
                       command = [
                           "wget", "--no-config", "--no-proxy", f"--warc-file={basename}", "--warc-cdx",
                           "--no-warc-keep-log", "--page-requisites", "--adjust-extension", "--convert-links",
@@ -935,6 +948,8 @@ jobs:
                               if source not in targets:
                                   continue
                               mime, code = fields[3:5]
+                              if code.startswith("2"):
+                                  captured_pages.add(source)
                               trailer = fields[6].rsplit(maxsplit=4)
                               if len(trailer) != 5:
                                   continue
@@ -945,7 +960,7 @@ jobs:
                                           site = target
                                       seen.add(target)
                                       wave.append(target)
-                              if (depth >= depth_limit or len(queue) >= page_limit - requested
+                              if (depth >= depth_limit or len(queue) >= next_depth_limit
                                       or mime.split(";", 1)[0] not in ("text/html", "application/xhtml+xml")
                                       or not code.startswith("2")):
                                   continue
@@ -963,7 +978,7 @@ jobs:
                                   if target and target not in seen and in_scope(target, site) and not filtered(target):
                                       seen.add(target)
                                       queue.append(target)
-                                      if len(queue) >= page_limit - requested:
+                                      if len(queue) >= next_depth_limit:
                                           break
                       if index_count:
                           responses += index_count
@@ -972,11 +987,14 @@ jobs:
                       else:
                           warc_path.unlink()
                           index_path.unlink()
+                      if wave:
+                          batches.appendleft((batch, hop + 1, wave))
                   if time.monotonic() >= deadline:
                       break
           if not responses:
               raise SystemExit("No HTTP responses were captured")
-          print(f"Arab News Archive selected {requested} page URL(s) and captured {responses} HTTP response(s)")
+          print(f"Arab News Archive selected {requested} page URL(s), fetched {len(captured_pages)} page URL(s) "
+                f"successfully, and captured {responses} HTTP response(s) in total")
           PYTHON
 
       - name: Upload WARC files to Internet Archive
