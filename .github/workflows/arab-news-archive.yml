@@ -410,8 +410,11 @@ jobs:
           log="$RUNNER_TEMP/arab-news-archive/logs/arab-news-archive-logs-$TRACE_ID.txt"
           python -u - <<'PYTHON' 2>&1 | tee -a "$log"
           from configparser import RawConfigParser
+          from datetime import timezone
+          from email.utils import parsedate_to_datetime
           import json
           import os
+          import random
           import re
           import time
           from urllib.parse import quote
@@ -444,16 +447,45 @@ jobs:
                   raise RuntimeError(f"{operation} returned an unexpected result")
               return data
 
+          def retry_after_seconds(response):
+              value = response.headers.get("Retry-After", "").strip()
+              if value.isascii() and value.isdigit():
+                  return float(value)
+              if not value:
+                  return 0
+              try:
+                  resume = parsedate_to_datetime(value)
+                  if resume.tzinfo is None:
+                      resume = resume.replace(tzinfo=timezone.utc)
+                  return max(0, resume.timestamp() - time.time())
+              except (TypeError, ValueError, OverflowError, OSError):
+                  return 0
+
+          def submit_capture(session, deadline):
+              max_retries = 3
+              for attempt in range(max_retries + 1):
+                  response = session.post(f"{base}/save", data=options, timeout=timeout, allow_redirects=False)
+                  if response.status_code != 429:
+                      return read_response(response, "Save Page Now submission")
+                  if attempt == max_retries:
+                      raise RuntimeError(f"Save Page Now submission returned HTTP 429 after {max_retries} retries")
+
+                  # Retry only explicit rate-limit rejections, since a timed-out POST may have started a job.
+                  delay = max(60 * 2 ** attempt, retry_after_seconds(response)) + random.uniform(0, 10)
+                  if time.monotonic() + delay >= deadline:
+                      raise RuntimeError("Save Page Now submission returned HTTP 429, retry delay exceeds the remaining capture window")
+                  print(f"Save Page Now submission returned HTTP 429, waiting {delay:.1f}s before retry {attempt + 1}/{max_retries}")
+                  time.sleep(delay)
+                  if time.monotonic() >= deadline:
+                      raise RuntimeError("Save Page Now submission returned HTTP 429, the capture window expired before retry")
+
           def capture(session):
-              submitted = read_response(
-                  session.post(f"{base}/save", data=options, timeout=timeout, allow_redirects=False),
-                  "Save Page Now submission",
-              )
+              deadline = time.monotonic() + 20 * 60
+              submitted = submit_capture(session, deadline)
               job_id = submitted.get("job_id")
               if not isinstance(job_id, str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,128}", job_id):
                   raise RuntimeError("Save Page Now did not start a new capture")
 
-              deadline = time.monotonic() + 20 * 60
               delay = 10
               while time.monotonic() < deadline:
                   time.sleep(min(delay, max(0, deadline - time.monotonic())))
@@ -465,8 +497,9 @@ jobs:
                       delay = 20
                       continue
                   if response.status_code in (429, 500, 502, 503, 504):
-                      retry_after = response.headers.get("Retry-After", "")
-                      delay = max(10, min(int(retry_after), 300)) if retry_after.isascii() and retry_after.isdigit() else 20
+                      delay = max(20, retry_after_seconds(response))
+                      if time.monotonic() + delay >= deadline:
+                          raise RuntimeError(f"Save Page Now status returned HTTP {response.status_code}, retry delay exceeds the remaining capture window")
                       continue
                   status = read_response(response, "Save Page Now status")
                   if status.get("status") == "success":
@@ -821,6 +854,22 @@ jobs:
               except ValueError:
                   return None
 
+          def run_wget(command, log, deadline):
+              with subprocess.Popen(command, cwd=output, stdout=log, stderr=subprocess.STDOUT) as process:
+                  try:
+                      while True:
+                          remaining = max(0, deadline - time.monotonic())
+                          try:
+                              return process.wait(timeout=min(30, remaining))
+                          except subprocess.TimeoutExpired:
+                              remaining = deadline - time.monotonic()
+                              if remaining <= 0:
+                                  raise
+                              print(f"Wget is still crawling, {remaining:.0f}s left in the crawl window")
+                  finally:
+                      if process.poll() is None:
+                          process.kill()
+
           site = url_key(os.environ["TARGET_URL"])
           if not site or not is_public(site):
               raise SystemExit("Enter a public HTTP or HTTPS link")
@@ -848,17 +897,17 @@ jobs:
                       warc_path = output / f"{basename}.warc.gz"
                       index_path = output / f"{basename}.cdx"
                       seeds_path.write_text("\n".join(wave) + "\n", encoding="utf-8")
+                      print(f"Crawl depth {depth}/{depth_limit}, fetching {len(wave)} page URL(s)")
+                      command = [
+                          "wget", "--no-config", "--no-proxy", f"--warc-file={basename}", "--warc-cdx",
+                          "--no-warc-keep-log", "--page-requisites", "--adjust-extension", "--convert-links",
+                          "--backup-converted", "--execute=robots=off", "--user-agent=ArabNewsArchiveCrawler/1.0",
+                          "--timeout=30", "--dns-timeout=10", "--wait=1", "--random-wait", "--tries=3",
+                          "--retry-connrefused", "--waitretry=5", "--max-redirect=0", "--quota=512m",
+                          f"--directory-prefix={downloads}", *wget_args, f"--input-file={seeds_path}",
+                      ]
                       try:
-                          status = subprocess.run(
-                              ["wget", "--no-config", "--no-proxy", f"--warc-file={basename}", "--warc-cdx",
-                               "--no-warc-keep-log", "--page-requisites", "--adjust-extension", "--convert-links",
-                               "--backup-converted", "--execute=robots=off", "--user-agent=ArabNewsArchiveCrawler/1.0",
-                               "--timeout=30", "--dns-timeout=10", "--wait=1", "--random-wait", "--tries=3",
-                               "--retry-connrefused", "--waitretry=5", "--max-redirect=0", "--quota=512m",
-                               f"--directory-prefix={downloads}", *wget_args, f"--input-file={seeds_path}"],
-                              cwd=output, stdout=log, stderr=subprocess.STDOUT,
-                              timeout=max(1, deadline - time.monotonic()), check=False,
-                          ).returncode
+                          status = run_wget(command, log, deadline)
                       except subprocess.TimeoutExpired:
                           print("Crawl time limit reached, keeping completed WARC files")
                           status = -1
@@ -918,6 +967,8 @@ jobs:
                                           break
                       if index_count:
                           responses += index_count
+                          print(f"Crawl depth {depth}/{depth_limit}, captured {index_count} HTTP response(s), "
+                                f"{len(queue)} page URL(s) selected for the next depth")
                       else:
                           warc_path.unlink()
                           index_path.unlink()
