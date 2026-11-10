@@ -1,5 +1,5 @@
 name: IA Size Calculator
-run-name: "IA Size Calculator: ${{ inputs.search_query }}
+run-name: "IA Size Calculator: ${{ inputs.search_query }}"
 
 on:
   workflow_dispatch:
