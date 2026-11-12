@@ -36,10 +36,10 @@ jobs:
         restore-keys: |
           ${{ runner.os }}-archive-cache-git-
 
-    - name: Install iagitbetter and IA CLI
+    - name: Install iagitbetter, iagitup, and IA CLI
       run: |
         python -m pip install --upgrade pip
-        pip install internetarchive iagitbetter aiohttp
+        pip install internetarchive iagitbetter iagitup aiohttp
 
     - name: Configure IA CLI
       env:
@@ -60,7 +60,15 @@ jobs:
         fi
 
     - name: Run iagitbetter
+      id: iagitbetter
       env:
         REPO_URL: ${{ inputs.url }}
       run: |
         iagitbetter --all-branches --releases 5 -- "$REPO_URL"
+
+    - name: Run iagitup
+      if: ${{ !cancelled() && (steps.iagitbetter.outcome == 'success' || steps.iagitbetter.outcome == 'failure') }}
+      env:
+        REPO_URL: ${{ inputs.url }}
+      run: |
+        iagitup -- "$REPO_URL"
