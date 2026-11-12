@@ -60,5 +60,7 @@ jobs:
         fi
 
     - name: Run iagitbetter
+      env:
+        REPO_URL: ${{ inputs.url }}
       run: |
-        iagitbetter ${{ inputs.url }}
+        iagitbetter --all-branches --releases 5 -- "$REPO_URL"
