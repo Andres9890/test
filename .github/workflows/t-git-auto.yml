@@ -1,7 +1,14 @@
 name: Auto Archive Repos to IA
-run-name: "Git Auto Archive [${{ github.event.schedule }}]"
+run-name: "Git Auto Archive [${{ github.event.schedule || inputs.url }}]"
 
 on:
+  workflow_dispatch:
+    inputs:
+      url:
+        description: Repository URL to archive
+        required: true
+        type: string
+
   schedule:
     # Use the same cron strings as keys in the GIT_ARCHIVE_SCHEDULES
     # Actions repository variable. Cron times are UTC.
@@ -11,14 +18,22 @@ permissions: {}
 
 jobs:
   archive:
-    # Example variable: {"17 */6 * * *":["https://github.com/owner/repo"]}
-    if: ${{ fromJSON(vars.GIT_ARCHIVE_SCHEDULES || '{}')[github.event.schedule][0] }}
+    # Example variable: {"17 */3 * * *":["https://github.com/owner/repo"]}
+    if: >-
+      ${{
+        github.event_name == 'workflow_dispatch' ||
+        fromJSON(vars.GIT_ARCHIVE_SCHEDULES || '{}')[github.event.schedule][0]
+      }}
     name: Archive ${{ matrix.repo }}
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        repo: ${{ fromJSON(vars.GIT_ARCHIVE_SCHEDULES)[github.event.schedule] }}
+        repo: >-
+          ${{
+            github.event_name == 'workflow_dispatch' && fromJSON(format('[{0}]', toJSON(inputs.url))) ||
+            fromJSON(vars.GIT_ARCHIVE_SCHEDULES)[github.event.schedule]
+          }}
     concurrency:
       group: git-auto-archive-${{ matrix.repo }}
       cancel-in-progress: false
